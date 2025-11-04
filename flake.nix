@@ -14,7 +14,9 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        toolchain = fenix.packages.${system}.stable.toolchain;
+        toolchain = fenix.packages.${system}.stable.toolchain.override{
+          targets = [  "wasm32-wasip2" ];
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -22,6 +24,11 @@
             toolchain
             pkg-config
             openssl
+            # WASM tools
+            wasm-tools
+            wasmtime
+            # Go tools for building Go components
+            tinygo
           ];
 
           RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
