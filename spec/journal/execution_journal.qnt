@@ -13,7 +13,7 @@ module executionJournal {
 
     // Concurrent region
     // Real System: [u8, 32]
-    type JoinSetId = str
+    type JoinSetId = PromiseId
 
     // Hash of the WASM binary. Pins execution to exact code version.
     // Real system: [u8; 32]
@@ -739,7 +739,7 @@ module executionJournal {
     pure val DIGESTS = Set("d1")
     pure val FUNC_NAMES = Set("fn1", "fn2")
     pure val SIGNAL_NAMES = Set("sig1", "sig2")
-    pure val JOINSET_IDS = Set("js1", "js2")
+    pure val JOINSET_IDS = Set(List(4), List(5))  // JoinSetId = List[int], distinct from EXEC_IDS
     pure val DURATIONS = Set(1, 2, 3)
     pure val ERRORS = Set("err1")
     pure val MAX_RETRY_ATTEMPTS = 3
