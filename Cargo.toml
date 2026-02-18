@@ -1,9 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/invariant-types",
     "crates/invariant-engine",
-    "crates/invariant-journal",
 ]
 
 [workspace.dependencies]
