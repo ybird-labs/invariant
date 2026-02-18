@@ -14,23 +14,16 @@ pub enum JournalViolation {
         actual: u64,
     },
     /// S-2: The first event in every journal must be `ExecutionStarted`.
-    MissingExecutionStarted {
-        first_event: String,
-    },
+    MissingExecutionStarted { first_event: String },
     /// S-3: At most one terminal event (`Completed`, `Failed`, `Cancelled`) per journal.
-    MultipleTerminalEvents {
-        first_at: u64,
-        second_at: u64,
-    },
+    MultipleTerminalEvents { first_at: u64, second_at: u64 },
     /// S-4: A terminal event must be the last entry in the journal.
     TerminalNotLast {
         terminal_seq: u64,
         journal_len: usize,
     },
     /// S-5: `ExecutionCancelled` requires a preceding `CancelRequested`.
-    CancelledWithoutRequest {
-        cancelled_seq: u64,
-    },
+    CancelledWithoutRequest { cancelled_seq: u64 },
 
     /// SE-1: `InvokeStarted` requires a preceding `InvokeScheduled` for the same promise.
     StartedWithoutScheduled {
