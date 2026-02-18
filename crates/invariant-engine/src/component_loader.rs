@@ -23,12 +23,10 @@ impl ComponentLoader {
 
     pub fn load(self, source: ComponentSource) -> Result<Component, RuntimeError> {
         match source {
-            ComponentSource::FilePath(path) => {
-                Component::from_file(&self.engine.get_engine(), path)
-                    .map_err(|e| RuntimeError::ComponentLoadError(e))
-            }
-            ComponentSource::Bytes(bytes) => Component::new(&self.engine.get_engine(), bytes)
-                .map_err(|e| RuntimeError::ComponentLoadError(e)),
+            ComponentSource::FilePath(path) => Component::from_file(self.engine.get_engine(), path)
+                .map_err(RuntimeError::ComponentLoadError),
+            ComponentSource::Bytes(bytes) => Component::new(self.engine.get_engine(), bytes)
+                .map_err(RuntimeError::ComponentLoadError),
             ComponentSource::Registry(_) => unimplemented!(),
         }
     }
