@@ -1,0 +1,27 @@
+name: Nix
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  flake-check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+
+      - name: Enable Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Run flake checks
+        run: nix flake check --print-build-logs

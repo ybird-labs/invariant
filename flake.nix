@@ -14,38 +14,87 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        toolchain = fenix.packages.${system}.stable.toolchain.override{
-          targets = [  "wasm32-wasip2" ];
+        lib = pkgs.lib;
+        sourceRoot = toString ./. + "/";
+        src = lib.cleanSourceWith {
+          src = ./.;
+          filter = path: _type:
+            let
+              relPath = lib.removePrefix sourceRoot (toString path);
+              excludedPrefixes = [
+                ".git/"
+                ".direnv/"
+                "target/"
+                "_apalache-out/"
+                ".cursor/"
+                ".claude/"
+                ".planning/"
+                "external/"
+                "result-"
+              ];
+              excludedPaths = [
+                ".git"
+                ".direnv"
+                "target"
+                "_apalache-out"
+                ".cursor"
+                ".claude"
+                ".planning"
+                "external"
+                "result"
+              ];
+            in
+            !(lib.any (prefix: lib.hasPrefix prefix relPath) excludedPrefixes
+              || lib.elem relPath excludedPaths);
+        };
+        toolchain = fenix.packages.${system}.stable.withComponents [
+          "cargo"
+          "clippy"
+          "rustc"
+          "rustfmt"
+          "rust-src"
+          "rust-analyzer"
+        ];
+        wasmTarget = fenix.packages.${system}.targets.wasm32-wasip2.stable.rust-std;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = toolchain;
+          rustc = toolchain;
+        };
+        package = rustPlatform.buildRustPackage {
+          pname = "invariant";
+          version = "0.1.0";
+          inherit src;
+          cargoLock.lockFile = ./Cargo.lock;
         };
       in
       {
+        formatter = pkgs.nixfmt-rfc-style;
+
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          packages = with pkgs; [
             toolchain
+            wasmTarget
             pkg-config
             openssl
             # WASM tools
             wasm-tools
             wasmtime
             # Go tools for building Go components
+            go
             tinygo
+            # Node.js for TypeScript/JavaScript components
+            nodejs
+            # Quint verification tool
+            quint
           ];
 
           RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
         };
 
-        packages.default = 
-          let
-            rustPlatform = pkgs.makeRustPlatform {
-              cargo = toolchain;
-              rustc = toolchain;
-            };
-          in
-          rustPlatform.buildRustPackage {
-            pname = "invariant";
-            version = "0.1.0";
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-          };
+        packages.default = package;
+
+        checks = {
+          default = package;
+        };
       });
 }
