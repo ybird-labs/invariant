@@ -205,9 +205,9 @@ mod tests {
         ];
 
         let folded = derive_status(&entries);
-        let incremental = entries
-            .iter()
-            .fold(ExecutionStatus::Running, |status, e| derive_next_status(status, &e.event));
+        let incremental = entries.iter().fold(ExecutionStatus::Running, |status, e| {
+            derive_next_status(status, &e.event)
+        });
 
         assert_eq!(folded, incremental);
     }
