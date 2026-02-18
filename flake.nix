@@ -14,39 +14,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        lib = pkgs.lib;
-        sourceRoot = toString ./. + "/";
-        src = lib.cleanSourceWith {
-          src = ./.;
-          filter = path: _type:
-            let
-              relPath = lib.removePrefix sourceRoot (toString path);
-              excludedPrefixes = [
-                ".git/"
-                ".direnv/"
-                "target/"
-                "_apalache-out/"
-                ".cursor/"
-                ".claude/"
-                ".planning/"
-                "external/"
-                "result-"
-              ];
-              excludedPaths = [
-                ".git"
-                ".direnv"
-                "target"
-                "_apalache-out"
-                ".cursor"
-                ".claude"
-                ".planning"
-                "external"
-                "result"
-              ];
-            in
-            !(lib.any (prefix: lib.hasPrefix prefix relPath) excludedPrefixes
-              || lib.elem relPath excludedPaths);
-        };
+        src = pkgs.lib.cleanSource ./.;
         toolchain = fenix.packages.${system}.stable.withComponents [
           "cargo"
           "clippy"
