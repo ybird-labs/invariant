@@ -8,7 +8,8 @@
 //!
 //! Invariants are grouped into four sub-modules (21 checks total):
 //! - [`structural`] (S-1..S-5): Sequence numbering, lifecycle bookends, terminal uniqueness.
-//! - [`side_effects`] (SE-1..SE-4): Invoke lifecycle ordering (Scheduled -> Started -> Completed).
+//! - [`side_effects`] (SE-1..SE-4): Invoke lifecycle ordering/finality
+//!   (Scheduled -> Started -> Completed).
 //! - [`control_flow`] (CF-1..CF-4): Timer, signal, and await consistency.
 //! - [`join_set`] (JS-1..JS-7): JoinSet creation, submission, and consumption rules.
 //!
@@ -48,8 +49,11 @@ pub struct InvariantState {
     /// Promise IDs from `InvokeScheduled` events. Checked by SE-1.
     pub(crate) scheduled_pids: HashSet<PromiseId>,
 
-    /// Promise IDs from `InvokeStarted` events. Checked by SE-2 and SE-3.
+    /// Promise IDs from `InvokeStarted` events. Checked by SE-2.
     pub(crate) started_pids: HashSet<PromiseId>,
+
+    /// `(promise_id, attempt)` pairs from `InvokeStarted` events. Checked by SE-3.
+    pub(crate) started_attempts: HashSet<(PromiseId, u32)>,
 
     /// Promise IDs from `InvokeCompleted` events. Checked by SE-4 and JS-4.
     pub(crate) completed_pids: HashSet<PromiseId>,
@@ -149,11 +153,17 @@ impl InvariantState {
             EventType::InvokeScheduled { promise_id, .. } => {
                 self.scheduled_pids.insert(promise_id.clone());
             }
-            // SE-2, SE-3: InvokeCompleted and InvokeRetrying require this
-            EventType::InvokeStarted { promise_id, .. } => {
-                self.started_pids.insert(promise_id.clone());
+            // SE-2: InvokeCompleted requires started pid.
+            // SE-3: InvokeRetrying requires started (pid, attempt).
+            EventType::InvokeStarted {
+                promise_id,
+                attempt,
+            } => {
+                let pid = promise_id.clone();
+                self.started_pids.insert(pid.clone());
+                self.started_attempts.insert((pid, *attempt));
             }
-            // SE-4: blocks further Started/Retrying; JS-4: gate for JoinSetAwaited
+            // SE-4: blocks further Started/Retrying/Completed; JS-4: gate for JoinSetAwaited
             EventType::InvokeCompleted { promise_id, .. } => {
                 self.completed_pids.insert(promise_id.clone());
             }
