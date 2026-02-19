@@ -27,7 +27,10 @@ pub enum AwaitKind {
     /// Wait for all promises (JoinSet js.all()).
     All,
     /// Wait for a named signal.
-    Signal { name: String },
+    Signal {
+        name: String,
+        promise_id: PromiseId,
+    },
 }
 
 // Retry policy for invocations.

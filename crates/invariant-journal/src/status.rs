@@ -119,16 +119,25 @@ pub fn can_resume(status: &ExecutionStatus, resolved: &HashSet<PromiseId>) -> bo
                 waiting_on.iter().all(|pid| resolved.contains(pid))
             }
             AwaitKind::Any => waiting_on.iter().any(|pid| resolved.contains(pid)),
-            AwaitKind::Signal { .. } => {
+            AwaitKind::Signal { promise_id, .. } => {
                 debug_assert_eq!(
                     waiting_on.len(),
                     1,
                     "CF-4 violated: AwaitKind::Signal must have exactly one waiting_on promise"
                 );
-                if waiting_on.len() != 1 {
+                let Some(waiting_pid) = waiting_on.first() else {
+                    return false;
+                };
+
+                debug_assert_eq!(
+                    waiting_pid, promise_id,
+                    "CF-4 violated: AwaitKind::Signal.promise_id must match waiting_on[0]"
+                );
+                if waiting_pid != promise_id {
                     return false;
                 }
-                resolved.contains(&waiting_on[0])
+
+                resolved.contains(waiting_pid)
             }
         },
         _ => false,

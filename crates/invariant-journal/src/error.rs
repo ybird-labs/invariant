@@ -35,12 +35,14 @@ pub enum JournalViolation {
         promise_id: PromiseId,
         completed_seq: u64,
     },
-    /// SE-3: `InvokeRetrying` requires a preceding `InvokeStarted` for the same promise.
+    /// SE-3: `InvokeRetrying` requires a preceding `InvokeStarted` with matching promise and attempt.
     RetryingWithoutStarted {
         promise_id: PromiseId,
+        failed_attempt: u32,
         retrying_seq: u64,
     },
-    /// SE-4: No `InvokeStarted` or `InvokeRetrying` after `InvokeCompleted` for the same promise.
+    /// SE-4: No `InvokeStarted`, `InvokeRetrying`, or second `InvokeCompleted`
+    /// after `InvokeCompleted` for the same promise.
     EventAfterCompleted {
         promise_id: PromiseId,
         offending_seq: u64,
@@ -64,7 +66,8 @@ pub enum JournalViolation {
         delivery_id: SignalDeliveryId,
         second_seq: u64,
     },
-    /// CF-4: `ExecutionAwaiting` with `Signal` kind must have exactly one promise in `waiting_on`.
+    /// CF-4: `ExecutionAwaiting` with `Signal` kind must have exactly one promise in
+    /// `waiting_on`, and it must match `AwaitKind::Signal.promise_id`.
     AwaitSignalInconsistent {
         awaiting_seq: u64,
         waiting_on_count: usize,
@@ -169,10 +172,11 @@ impl std::fmt::Display for JournalViolation {
             ),
             Self::RetryingWithoutStarted {
                 promise_id,
+                failed_attempt,
                 retrying_seq,
             } => write!(
                 f,
-                "SE-3: InvokeRetrying at seq {retrying_seq} for {promise_id} without prior InvokeStarted"
+                "SE-3: InvokeRetrying at seq {retrying_seq} for {promise_id} failed_attempt {failed_attempt} without prior matching InvokeStarted"
             ),
             Self::EventAfterCompleted {
                 promise_id,
@@ -210,7 +214,7 @@ impl std::fmt::Display for JournalViolation {
                 waiting_on_count,
             } => write!(
                 f,
-                "CF-4: ExecutionAwaiting(Signal) at seq {awaiting_seq} has {waiting_on_count} promises, expected 1"
+                "CF-4: ExecutionAwaiting(Signal) at seq {awaiting_seq} is inconsistent (waiting_on_count={waiting_on_count}); expected exactly one waiting promise matching AwaitKind::Signal.promise_id"
             ),
             Self::SubmitWithoutCreate {
                 join_set_id,
