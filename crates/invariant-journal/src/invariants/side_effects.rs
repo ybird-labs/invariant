@@ -1,11 +1,31 @@
+//! Side-effect invariants (SE-1 through SE-4).
+//!
+//! These checks enforce the three-phase invoke lifecycle:
+//! Scheduled → Started → Completed. Each phase is gated on its predecessor,
+//! and `InvokeCompleted` is a terminal absorbing state — no further Started,
+//! Retrying, or Completed events may reference the same promise after it.
+//!
+//! SE-3 is intentionally stricter than the Quint spec: it checks the
+//! `(promise_id, failed_attempt)` pair rather than just `promise_id`,
+//! ensuring that a retry references the exact attempt that was started.
+
 use invariant_types::{EventType, JournalEntry};
 
 use crate::error::JournalViolation;
 
 use super::InvariantState;
+
+/// Validate side-effect invariants against the current accumulated state.
+///
+/// Within each event arm, SE-4 (completed finality) is checked before the
+/// predecessor checks (SE-1, SE-2, SE-3). This precedence prevents
+/// misleading "missing predecessor" errors when the real problem is that
+/// the promise lifecycle has already terminated.
 pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), JournalViolation> {
     match &entry.event {
+        // InvokeStarted: SE-4 (finality) then SE-1 (requires prior Scheduled).
         EventType::InvokeStarted { promise_id, .. } => {
+            // SE-4: reject if this promise already completed.
             if state.completed_pids.contains(promise_id) {
                 return Err(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
@@ -13,6 +33,7 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                     offending_event: entry.event.name().to_string(),
                 });
             }
+            // SE-1: Started requires a preceding Scheduled for the same promise.
             if !state.scheduled_pids.contains(promise_id) {
                 return Err(JournalViolation::StartedWithoutScheduled {
                     promise_id: promise_id.clone(),
@@ -20,13 +41,18 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                 });
             }
         }
+        // InvokeCompleted: SE-2 (requires prior Started) then SE-4 (no duplicate).
+        // Note: SE-2 is checked first here because a Completed without any
+        // Started is a more fundamental violation than a second Completed.
         EventType::InvokeCompleted { promise_id, .. } => {
+            // SE-2: Completed requires a preceding Started for the same promise.
             if !state.started_pids.contains(promise_id) {
                 return Err(JournalViolation::CompletedWithoutStarted {
                     promise_id: promise_id.clone(),
                     completed_seq: entry.sequence,
                 });
             }
+            // SE-4: reject duplicate Completed for an already-completed promise.
             if state.completed_pids.contains(promise_id) {
                 return Err(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
@@ -35,11 +61,13 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                 });
             }
         }
+        // InvokeRetrying: SE-4 (finality) then SE-3 (requires matching Started attempt).
         EventType::InvokeRetrying {
             promise_id,
             failed_attempt,
             ..
         } => {
+            // SE-4: reject if this promise already completed.
             if state.completed_pids.contains(promise_id) {
                 return Err(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
@@ -47,6 +75,9 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                     offending_event: entry.event.name().to_string(),
                 });
             }
+            // SE-3: Retrying requires a Started with the exact (promise_id, attempt) pair.
+            // Stricter than Quint (which checks promise_id only) — ensures the
+            // retry references the specific attempt that was actually started.
             if !state
                 .started_attempts
                 .contains(&(promise_id.clone(), *failed_attempt))
