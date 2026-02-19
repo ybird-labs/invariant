@@ -6,9 +6,11 @@
 //! (CF-2) and at-most-once consumption (CF-3). The await-signal consistency
 //! rule (CF-4) ensures that `ExecutionAwaiting` with `Signal` kind carries
 //! exactly one promise in `waiting_on`, matching the Quint spec's
-//! `awaitSignalConsistent` invariant.
+//! `awaitSignalConsistent` invariant. We also enforce set-like semantics
+//! for `waiting_on` by rejecting duplicate promise IDs.
 
 use invariant_types::{AwaitKind, EventType, JournalEntry};
+use std::collections::HashSet;
 
 use crate::error::JournalViolation;
 
@@ -61,22 +63,34 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                 });
             }
         }
-        // CF-4: AwaitKind::Signal must wait on exactly one promise.
-        EventType::ExecutionAwaiting {
-            waiting_on,
-            kind: AwaitKind::Signal { promise_id, .. },
-        } => {
-            if waiting_on.len() != 1 {
-                return Err(JournalViolation::AwaitSignalInconsistent {
-                    awaiting_seq: entry.sequence,
-                    waiting_on_count: waiting_on.len(),
-                });
+        EventType::ExecutionAwaiting { waiting_on, kind } => {
+            // Quint models waiting_on as a set. Rust stores Vec for schema compatibility,
+            // so enforce no-duplicates at validation time.
+            let mut seen: HashSet<&invariant_types::PromiseId> =
+                HashSet::with_capacity(waiting_on.len());
+            for pid in waiting_on {
+                if !seen.insert(pid) {
+                    return Err(JournalViolation::AwaitWaitingOnDuplicate {
+                        awaiting_seq: entry.sequence,
+                        promise_id: pid.clone(),
+                    });
+                }
             }
-            if waiting_on[0] != *promise_id {
-                return Err(JournalViolation::AwaitSignalInconsistent {
-                    awaiting_seq: entry.sequence,
-                    waiting_on_count: waiting_on.len(),
-                });
+
+            // CF-4: AwaitKind::Signal must wait on exactly one promise.
+            if let AwaitKind::Signal { promise_id, .. } = kind {
+                if waiting_on.len() != 1 {
+                    return Err(JournalViolation::AwaitSignalInconsistent {
+                        awaiting_seq: entry.sequence,
+                        waiting_on_count: waiting_on.len(),
+                    });
+                }
+                if waiting_on[0] != *promise_id {
+                    return Err(JournalViolation::AwaitSignalInconsistent {
+                        awaiting_seq: entry.sequence,
+                        waiting_on_count: waiting_on.len(),
+                    });
+                }
             }
         }
         _ => {}
@@ -377,6 +391,75 @@ mod tests {
         );
 
         assert!(check(&state, &entry).is_ok());
+    }
+
+    #[test]
+    fn waiting_on_duplicate_for_any_reports_await_waiting_on_duplicate() {
+        let dup = pid(14);
+        let state = InvariantState::default();
+        let entry = mk_entry(
+            15,
+            EventType::ExecutionAwaiting {
+                waiting_on: vec![dup.clone(), dup.clone()],
+                kind: AwaitKind::Any,
+            },
+        );
+
+        let err = check(&state, &entry).unwrap_err();
+        assert_eq!(
+            err,
+            JournalViolation::AwaitWaitingOnDuplicate {
+                awaiting_seq: 15,
+                promise_id: dup,
+            }
+        );
+    }
+
+    #[test]
+    fn waiting_on_duplicate_for_all_reports_await_waiting_on_duplicate() {
+        let dup = pid(15);
+        let state = InvariantState::default();
+        let entry = mk_entry(
+            16,
+            EventType::ExecutionAwaiting {
+                waiting_on: vec![dup.clone(), dup.clone()],
+                kind: AwaitKind::All,
+            },
+        );
+
+        let err = check(&state, &entry).unwrap_err();
+        assert_eq!(
+            err,
+            JournalViolation::AwaitWaitingOnDuplicate {
+                awaiting_seq: 16,
+                promise_id: dup,
+            }
+        );
+    }
+
+    #[test]
+    fn waiting_on_duplicate_precedes_signal_shape_check() {
+        let dup = pid(16);
+        let state = InvariantState::default();
+        let entry = mk_entry(
+            17,
+            EventType::ExecutionAwaiting {
+                waiting_on: vec![dup.clone(), dup.clone()],
+                kind: AwaitKind::Signal {
+                    name: "sig".to_string(),
+                    promise_id: pid(99),
+                },
+            },
+        );
+
+        let err = check(&state, &entry).unwrap_err();
+        assert_eq!(
+            err,
+            JournalViolation::AwaitWaitingOnDuplicate {
+                awaiting_seq: 17,
+                promise_id: dup,
+            }
+        );
     }
 
     #[test]

@@ -59,6 +59,8 @@ Formal basis: Non-idempotent operations must cache results. All follow **3-phase
 
 `InvokeKind` categorizes the invocation type. The `kind` field lives on `InvokeScheduled` only — later phases inherit kind via promise_id lookup.
 
+Modeling note: Quint keeps a fixed retry bound for tractable model checking and does not interpret `retry_policy`; Rust runtime enforces retry policy (including max attempts).
+
 ```rust
 pub enum InvokeKind {
     Function,   // function/task/workflow invocation
@@ -114,6 +116,12 @@ pub struct JoinSetId(pub PromiseId);
 ```
 
 **Why PromiseId, not string or counter:** (1) Unique by construction — same Dewey encoding guarantee as all other IDs. (2) Deterministic on replay — position-based, not dependent on runtime values. (3) Zero new mechanism — reuses `nextChildSeq` and `allocatedChildren`. (4) A PromiseId newtype captures the structural relationship between JoinSets and the identity hierarchy with typed safety.
+
+**Boundary: INV-6**
+- Per-journal validator does not check cross-execution uniqueness.
+- Uniqueness is guaranteed by:
+  1) `PromiseId` construction (`root + path`)
+  2) Persistence constraints (below)
 
 `JoinSetAwaited` is a **replay marker**, not a state transition. It records which result was consumed at this point — whether or not the workflow blocked. `ExecutionAwaiting` handles blocking; `JoinSetAwaited` handles replay ordering. See `JOINSET_DESIGN.md` for full design.
 

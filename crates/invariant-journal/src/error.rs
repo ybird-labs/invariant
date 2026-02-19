@@ -72,6 +72,12 @@ pub enum JournalViolation {
         awaiting_seq: u64,
         waiting_on_count: usize,
     },
+    /// Model-shape alignment: `ExecutionAwaiting.waiting_on` is set-like.
+    /// Duplicate promise IDs are invalid.
+    AwaitWaitingOnDuplicate {
+        awaiting_seq: u64,
+        promise_id: PromiseId,
+    },
 
     /// JS-1: `JoinSetSubmitted` requires a preceding `JoinSetCreated` for the same set.
     SubmitWithoutCreate {
@@ -215,6 +221,13 @@ impl std::fmt::Display for JournalViolation {
             } => write!(
                 f,
                 "CF-4: ExecutionAwaiting(Signal) at seq {awaiting_seq} is inconsistent (waiting_on_count={waiting_on_count}); expected exactly one waiting promise matching AwaitKind::Signal.promise_id"
+            ),
+            Self::AwaitWaitingOnDuplicate {
+                awaiting_seq,
+                promise_id,
+            } => write!(
+                f,
+                "ExecutionAwaiting at seq {awaiting_seq} contains duplicate waiting_on promise {promise_id}"
             ),
             Self::SubmitWithoutCreate {
                 join_set_id,

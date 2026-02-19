@@ -44,7 +44,7 @@ module executionJournal {
     // What kind of await
     type AwaitKind =
         | Single              // waiting on one promise
-        | Any                 // first of many (JoinSet js.next())
+        | AwaitAny            // first of many (JoinSet js.next()) - renamed to avoid TLC's built-in Any
         | All                 // all must complete (JoinSet js.all())
         | AwaitSignal({ name: str, promise_id: PromiseId })  // waiting for named signal
 
@@ -188,7 +188,7 @@ module executionJournal {
             | Blocked(b) => match b.kind {
                 | Single => b.waiting_on.forall(pid => isResolved(exec.journal, pid))
                 | All => b.waiting_on.forall(pid => isResolved(exec.journal, pid))
-                | Any => b.waiting_on.exists(pid => isResolved(exec.journal, pid))
+                | AwaitAny => b.waiting_on.exists(pid => isResolved(exec.journal, pid))
                 | AwaitSignal(s) => isResolved(exec.journal, s.promise_id)
             }
             | _ => false
@@ -241,6 +241,14 @@ module executionJournal {
         journal.indices().exists(i =>
             match journal.nth(i).event {
                 | InvokeStarted(e) => e.promise_id == pid
+                | _ => false
+            }
+        )
+
+    pure def hasInvokeStartedAttempt(journal: List[JournalEntry], pid: PromiseId, attempt: int): bool =
+        journal.indices().exists(i =>
+            match journal.nth(i).event {
+                | InvokeStarted(e) => e.promise_id == pid and e.attempt == attempt
                 | _ => false
             }
         )
@@ -336,8 +344,19 @@ module executionJournal {
     // =========================================================================
     // Initialization
     // =========================================================================
+    // Root execution with one allocated child so allocatedChildren is never empty for at least one execution
     action init = all {
-        executions' = Map(),
+        executions' = Map().put(List(1), {
+            journal: List(
+                mkEntry(0, 0, ExecutionStarted({ component_digest: "d1", input: "p1",
+                                                   parent_id: List(1), idempotency_key: "k1" })),
+                mkEntry(1, 1, InvokeScheduled({ promise_id: List(1, 0), kind: Function,
+                                                function_name: "fn1", input: "p1", retry_policy: "rp1" })),
+            ),
+            status: Running,
+            nextChildSeq: 1,
+            allocatedChildren: Set(List(1, 0)),
+        }),
         clock' = 0,
     }
 
@@ -349,6 +368,7 @@ module executionJournal {
     action startExecution(eid: PromiseId, ts: Timestamp, digest: ComponentDigest,
                           input: Payload, parent: PromiseId, key: str): bool = all {
         not(eid.in(executions.keys())),
+        MAX_EVENTS > 0,
         executions' = executions.put(eid, {
             journal: List(mkEntry(0, ts,
                 ExecutionStarted({ component_digest: digest, input: input,
@@ -365,6 +385,7 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             not(exec.status.in(TERMINAL_STATES)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -382,6 +403,7 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             not(exec.status.in(TERMINAL_STATES)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -399,6 +421,7 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             not(exec.status.in(TERMINAL_STATES)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -418,6 +441,7 @@ module executionJournal {
             not(exec.status.in(TERMINAL_STATES)),
             hasCancelRequested(exec.journal),
             exec.status == Cancelling,
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -441,6 +465,8 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             exec.status == Running,
+            exec.journal.length() < MAX_EVENTS,
+            exec.nextChildSeq < MAX_CHILDREN,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -462,6 +488,7 @@ module executionJournal {
         all {
             not(exec.status.in(TERMINAL_STATES)),
             hasInvokeScheduled(exec.journal, childPid),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -482,6 +509,7 @@ module executionJournal {
             not(exec.status.in(TERMINAL_STATES)),
             hasInvokeStarted(exec.journal, childPid),
             not(hasInvokeCompleted(exec.journal, childPid)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -501,9 +529,12 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             not(exec.status.in(TERMINAL_STATES)),
-            hasInvokeStarted(exec.journal, childPid),
+            hasInvokeStartedAttempt(exec.journal, childPid, failedAttempt),
             not(hasInvokeCompleted(exec.journal, childPid)),
+            // Quint model uses a fixed retry cap for finite state exploration.
+            // retry_policy semantics are enforced in Rust runtime, not interpreted here.
             retryCount(exec.journal, childPid) < MAX_RETRY_ATTEMPTS,
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -523,6 +554,8 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             exec.status == Running,
+            exec.journal.length() < MAX_EVENTS,
+            exec.nextChildSeq < MAX_CHILDREN,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -541,6 +574,8 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             exec.status == Running,
+            exec.journal.length() < MAX_EVENTS,
+            exec.nextChildSeq < MAX_CHILDREN,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -559,6 +594,8 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             exec.status == Running,
+            exec.journal.length() < MAX_EVENTS,
+            exec.nextChildSeq < MAX_CHILDREN,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -578,6 +615,7 @@ module executionJournal {
         all {
             not(exec.status.in(TERMINAL_STATES)),
             hasTimerScheduled(exec.journal, childPid),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -596,6 +634,7 @@ module executionJournal {
         val deliveryId = signalDeliveredCount(exec.journal, signalName) + 1
         all {
             not(exec.status.in(TERMINAL_STATES)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -618,6 +657,8 @@ module executionJournal {
             exec.status == Running,
             signalDeliveredCount(exec.journal, signalName) >= deliveryId,
             hasSignalDelivered(exec.journal, signalName, deliveryId, payload),
+            exec.journal.length() < MAX_EVENTS,
+            exec.nextChildSeq < MAX_CHILDREN,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -641,6 +682,7 @@ module executionJournal {
                 | AwaitSignal(s) => waitingOn.size() == 1 and waitingOn.contains(s.promise_id)
                 | _ => true
             },
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -658,6 +700,7 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             canResume(exec),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts, ExecutionResumed)),
@@ -675,6 +718,7 @@ module executionJournal {
         val exec = executions.get(eid)
         all {
             exec.status == Running,
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -696,6 +740,7 @@ module executionJournal {
             hasJoinSetCreated(exec.journal, jsId),
             not(hasJoinSetAwaited(exec.journal, jsId)),
             not(hasSubmittedToOtherJoinSet(exec.journal, childPid, jsId)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -718,6 +763,7 @@ module executionJournal {
             hasJoinSetSubmittedFor(exec.journal, jsId, childPid),
             hasInvokeCompleted(exec.journal, childPid),
             not(hasJoinSetAwaitedFor(exec.journal, jsId, childPid)),
+            exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
                     mkEntry(exec.journal.length(), ts,
@@ -737,19 +783,29 @@ module executionJournal {
     pure val EXEC_IDS = Set(List(1), List(2), List(3))
     pure val PAYLOADS = Set("p1", "p2")
     pure val DIGESTS = Set("d1")
-    pure val FUNC_NAMES = Set("fn1", "fn2")
+    pure val FUNC_NAMES = Set("fn1")
     pure val SIGNAL_NAMES = Set("sig1", "sig2")
     pure val JOINSET_IDS = Set(List(4), List(5))  // JoinSetId = List[int], distinct from EXEC_IDS
-    pure val DURATIONS = Set(1, 2, 3)
+    pure val DURATIONS = Set(1)
     pure val ERRORS = Set("err1")
+    // Quint-only exploration bound (not derived from retry_policy).
+    // Rust runtime enforces real retry-policy limits.
     pure val MAX_RETRY_ATTEMPTS = 3
-    pure val IDEM_KEYS = Set("k1", "k2")
-    pure val RETRY_POLICIES = Set("rp1", "rp2")
+    pure val IDEM_KEYS = Set("k1")
+    pure val RETRY_POLICIES = Set("rp1")
+    pure val MAX_EVENTS = 8
+    pure val MAX_CHILDREN = 2
+    pure val MAX_CLOCK = 10
+
+    // Executions that have at least one allocated child (for branches that need oneOf(allocatedChildren))
+    def execsWithChildren = executions.keys().filter(e => executions.get(e).allocatedChildren.size() > 0)
 
     // =========================================================================
     // Step action — nondeterministic dispatcher for model checking
     // =========================================================================
-    action step = any {
+    action step = all {
+        clock < MAX_CLOCK,
+        any {
         // --- Lifecycle ---
         nondet eid = oneOf(EXEC_IDS)
         nondet digest = oneOf(DIGESTS)
@@ -784,18 +840,19 @@ module executionJournal {
         all { scheduleInvoke(eid, clock, childPid_si, kind, fname, input, retryPolicy), clock' = clock + 1 },
 
         // --- Side Effects (referencing: childPid from already-allocated children) ---
-        nondet eid = oneOf(executions.keys())
+        // Use execsWithChildren to avoid oneOf on empty allocatedChildren (Rust backend needs this)
+        nondet eid = oneOf(execsWithChildren)
         nondet childPid_sti = oneOf(executions.get(eid).allocatedChildren)
         nondet attempt = oneOf(Set(1, 2, 3))
         all { startInvoke(eid, clock, childPid_sti, attempt), clock' = clock + 1 },
 
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         nondet childPid_ci = oneOf(executions.get(eid).allocatedChildren)
         nondet result = oneOf(PAYLOADS)
         nondet attempt = oneOf(Set(1, 2, 3))
         all { completeInvoke(eid, clock, childPid_ci, result, attempt), clock' = clock + 1 },
 
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         nondet childPid_ri = oneOf(executions.get(eid).allocatedChildren)
         nondet failedAttempt = oneOf(Set(1, 2, 3))
         nondet error = oneOf(ERRORS)
@@ -803,7 +860,7 @@ module executionJournal {
 
         // --- Nondeterminism (child-allocating) ---
         nondet eid = oneOf(executions.keys())
-        nondet value = oneOf(Set("rand1", "rand2"))
+        nondet value = oneOf(Set("rand1"))
         val childPid_gr = childId(eid, executions.get(eid).nextChildSeq)
         all { generateRandom(eid, clock, childPid_gr, value), clock' = clock + 1 },
 
@@ -818,7 +875,7 @@ module executionJournal {
         all { scheduleTimer(eid, clock, childPid_st, duration, clock + duration), clock' = clock + 1 },
 
         // --- Control Flow (referencing) ---
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         nondet childPid_ft = oneOf(executions.get(eid).allocatedChildren)
         all { fireTimer(eid, clock, childPid_ft), clock' = clock + 1 },
 
@@ -835,19 +892,14 @@ module executionJournal {
         all { receiveSignal(eid, clock, childPid_rs, signalName, payload), clock' = clock + 1 },
 
         // --- Control Flow (await — domain-meaningful patterns) ---
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         val children_aw = executions.get(eid).allocatedChildren
         all {
-            children_aw.size() > 0,
             any {
-                // Single: wait on one child
                 nondet child = oneOf(children_aw)
                 all { awaitExecution(eid, clock, Set(child), Single), clock' = clock + 1 },
-                // Any: wait on all children, first to resolve unblocks
-                all { awaitExecution(eid, clock, children_aw, Any), clock' = clock + 1 },
-                // All: wait on all children, all must complete
+                all { awaitExecution(eid, clock, children_aw, AwaitAny), clock' = clock + 1 },
                 all { awaitExecution(eid, clock, children_aw, All), clock' = clock + 1 },
-                // AwaitSignal: wait on one child for a named signal
                 nondet child = oneOf(children_aw)
                 nondet sigName = oneOf(SIGNAL_NAMES)
                 all { awaitExecution(eid, clock, Set(child), AwaitSignal({ name: sigName, promise_id: child })), clock' = clock + 1 },
@@ -863,16 +915,17 @@ module executionJournal {
         nondet jsId = oneOf(JOINSET_IDS)
         all { createJoinSet(eid, clock, jsId), clock' = clock + 1 },
 
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         nondet jsId = oneOf(JOINSET_IDS)
         nondet childPid_stj = oneOf(executions.get(eid).allocatedChildren)
         all { submitToJoinSet(eid, clock, jsId, childPid_stj), clock' = clock + 1 },
 
-        nondet eid = oneOf(executions.keys())
+        nondet eid = oneOf(execsWithChildren)
         nondet jsId = oneOf(JOINSET_IDS)
         nondet childPid_aj = oneOf(executions.get(eid).allocatedChildren)
         nondet result = oneOf(PAYLOADS)
         all { awaitJoinSet(eid, clock, jsId, childPid_aj, result), clock' = clock + 1 },
+        }
     }
 
 
@@ -883,7 +936,7 @@ module executionJournal {
     // INV-1:  The first event is always Execution Started
    val firstEventIsStarted = executions.keys().forall(eid =>
     val exec = executions.get(eid)
-    exec.journal.length() == 0 or
+    exec.journal.length() > 0 and
       match exec.journal.nth(0).event {
         | ExecutionStarted(_) => true
         | _ => false
@@ -968,7 +1021,7 @@ module executionJournal {
         )
     )
 
-    /// SE-4: No InvokeStarted/Retrying after InvokeCompleted for same promise_id
+    /// SE-4: No InvokeStarted/Retrying/Completed after InvokeCompleted for same promise_id
     val noEventsAfterCompleted = executions.keys().forall(eid =>
         val exec = executions.get(eid)
         exec.journal.indices().forall(i =>
@@ -977,6 +1030,7 @@ module executionJournal {
                     j <= i or match exec.journal.nth(j).event {
                         | InvokeStarted(s) => s.promise_id != e.promise_id
                         | InvokeRetrying(s) => s.promise_id != e.promise_id
+                        | InvokeCompleted(s) => s.promise_id != e.promise_id
                         | _ => true
                     }
                 )
@@ -985,14 +1039,14 @@ module executionJournal {
         )
     )
 
-    /// SE-3: InvokeRetrying requires preceding InvokeStarted for same promise_id
+    /// SE-3: InvokeRetrying requires preceding InvokeStarted for same promise_id and failed_attempt
     val retryingRequiresStarted = executions.keys().forall(eid =>
         val exec = executions.get(eid)
         exec.journal.indices().forall(i =>
             match exec.journal.nth(i).event {
                 | InvokeRetrying(e) => exec.journal.indices().exists(j =>
                     j < i and match exec.journal.nth(j).event {
-                        | InvokeStarted(s) => s.promise_id == e.promise_id
+                        | InvokeStarted(s) => s.promise_id == e.promise_id and s.attempt == e.failed_attempt
                         | _ => false
                     }
                 )
@@ -1001,8 +1055,9 @@ module executionJournal {
         )
     )
 
-    /// SE-5: Retry count per promise_id never exceeds MAX_RETRY_ATTEMPTS
-    val retryBounded = executions.keys().forall(eid =>
+    /// MB-1 (Quint model bound): fixed retry cap to keep traces finite.
+    /// Runtime retry-policy enforcement is out of scope for this model.
+    val modelRetryBounded = executions.keys().forall(eid =>
         val exec = executions.get(eid)
         exec.allocatedChildren.forall(pid =>
             retryCount(exec.journal, pid) <= MAX_RETRY_ATTEMPTS
@@ -1191,7 +1246,9 @@ module executionJournal {
         )
     )
 
-    /// INV-6: No duplicate promise_ids across executions
+    /// INV-6 (system-level): No duplicate promise_ids across executions.
+    /// Enforced by identity construction + persistence constraints;
+    /// not by invariant-journal local validation.
     val promiseIdUniqueness = executions.keys().forall(eid1 =>
         executions.keys().forall(eid2 =>
             eid1 == eid2 or
