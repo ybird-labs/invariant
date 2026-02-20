@@ -130,7 +130,9 @@ module executionJournal {
     // =========================================================================
     // Execution Status — journal state machine
     // =========================================================================
-    // Running → Blocked ↔ Running → Cancelling → Terminal
+    // Running → Blocked ↔ Running → Terminal (Completed | Failed)
+    // Running → Cancelling → Terminal (Completed | Failed | Cancelled)
+    // Blocked → Cancelling → Terminal (Completed | Failed | Cancelled)
     // Terminal states: Completed, Failed, Cancelled
     type ExecutionStatus =
         | Running                     // actively executing code
@@ -384,7 +386,7 @@ module executionJournal {
         eid.in(executions.keys()),
         val exec = executions.get(eid)
         all {
-            not(exec.status.in(TERMINAL_STATES)),
+            or { exec.status == Running, exec.status == Cancelling },
             exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
@@ -402,7 +404,7 @@ module executionJournal {
         eid.in(executions.keys()),
         val exec = executions.get(eid)
         all {
-            not(exec.status.in(TERMINAL_STATES)),
+            or { exec.status == Running, exec.status == Cancelling },
             exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
@@ -420,7 +422,7 @@ module executionJournal {
         eid.in(executions.keys()),
         val exec = executions.get(eid)
         all {
-            not(exec.status.in(TERMINAL_STATES)),
+            or { exec.status == Running, match exec.status { | Blocked(_) => true | _ => false } },
             exec.journal.length() < MAX_EVENTS,
             executions' = executions.set(eid, {
                 journal: exec.journal.append(
@@ -925,6 +927,9 @@ module executionJournal {
         nondet childPid_aj = oneOf(executions.get(eid).allocatedChildren)
         nondet result = oneOf(PAYLOADS)
         all { awaitJoinSet(eid, clock, jsId, childPid_aj, result), clock' = clock + 1 },
+
+        // Stutter — system quiescent, no enabled transitions
+        all { executions' = executions, clock' = clock },
         }
     }
 

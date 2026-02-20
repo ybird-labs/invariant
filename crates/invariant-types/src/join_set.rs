@@ -7,7 +7,6 @@ use crate::promise_id::PromiseId;
 ///
 /// PromiseId — `join_set()` allocates a child position
 /// via `nextChildSeq++`, consistent with the identity model.
-/// a JoinSet to another JoinSet).#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct JoinSetId(pub PromiseId);
 
