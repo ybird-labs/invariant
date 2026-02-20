@@ -1,6 +1,6 @@
-use crate::join_set::JoinSetId;
 use crate::payload::Payload;
 use crate::promise_id::PromiseId;
+use crate::{join_set::JoinSetId, ExecutionError};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -27,10 +27,7 @@ pub enum AwaitKind {
     /// Wait for all promises (JoinSet js.all()).
     All,
     /// Wait for a named signal.
-    Signal {
-        name: String,
-        promise_id: PromiseId,
-    },
+    Signal { name: String, promise_id: PromiseId },
 }
 
 // Retry policy for invocations.
@@ -58,7 +55,7 @@ pub enum EventType {
     /// Function returned Ok (terminal).
     ExecutionCompleted { result: Payload },
     /// Function returned Err or WASM trap (terminal).
-    ExecutionFailed { error: String },
+    ExecutionFailed { error: ExecutionError },
     /// External cancel signal arrived. Transitions to Cancelling.
     CancelRequested { reason: String },
     /// Cancellation finalized after cleanup (terminal). Requires preceding CancelRequested.
@@ -86,7 +83,7 @@ pub enum EventType {
     InvokeRetrying {
         promise_id: PromiseId,
         failed_attempt: u32,
-        error: String,
+        error: ExecutionError,
         retry_at: DateTime<Utc>,
     },
 

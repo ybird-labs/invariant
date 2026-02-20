@@ -9,7 +9,7 @@
 //! `(promise_id, failed_attempt)` pair rather than just `promise_id`,
 //! ensuring that a retry references the exact attempt that was started.
 
-use invariant_types::{EventType, JournalEntry};
+use invariant_types::{ErrorKind, EventType, ExecutionError, JournalEntry};
 
 use crate::error::JournalViolation;
 
@@ -152,7 +152,7 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p.clone(),
                 failed_attempt: 1,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );
@@ -356,7 +356,7 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p.clone(),
                 failed_attempt: 1,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );
@@ -385,7 +385,7 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p,
                 failed_attempt: 2,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );

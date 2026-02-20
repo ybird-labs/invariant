@@ -66,7 +66,7 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use invariant_types::{Codec, Payload};
+    use invariant_types::{Codec, ErrorKind, ExecutionError, Payload};
 
     fn payload() -> Payload {
         Payload::new(vec![], Codec::Json)
@@ -95,7 +95,7 @@ mod tests {
 
     fn failed_event() -> EventType {
         EventType::ExecutionFailed {
-            error: "boom".to_string(),
+            error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
         }
     }
 
