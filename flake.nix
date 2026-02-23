@@ -22,6 +22,7 @@
           "rustfmt"
           "rust-src"
           "rust-analyzer"
+          "llvm-tools"
         ];
         wasmTarget = fenix.packages.${system}.targets.wasm32-wasip2.stable.rust-std;
         rustPlatform = pkgs.makeRustPlatform {
@@ -54,6 +55,10 @@
             nodejs
             # Quint verification tool
             quint
+            # Testing tools
+            cargo-nextest
+            cargo-llvm-cov
+            cargo-insta
           ];
 
           RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
