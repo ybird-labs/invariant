@@ -1,8 +1,24 @@
+use std::time::Duration;
+
 use crate::payload::Payload;
 use crate::promise_id::PromiseId;
 use crate::{join_set::JoinSetId, ExecutionError};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+mod serde_duration {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        (d.as_secs(), d.subsec_nanos()).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let (secs, nanos) = <(u64, u32)>::deserialize(d)?;
+        Ok(Duration::new(secs, nanos))
+    }
+}
 
 /// Categorizes the type of side-effect invocation.
 ///
@@ -104,6 +120,7 @@ pub enum EventType {
     /// `sleep(duration)` called. Records both the requested duration and computed fire time.
     TimerScheduled {
         promise_id: PromiseId,
+        #[serde(with = "serde_duration")]
         duration: Duration,
         fire_at: DateTime<Utc>,
     },
