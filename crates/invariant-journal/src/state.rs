@@ -297,8 +297,8 @@ fn build_child_state(
                     JournalViolation::AllocatedChildMismatch {
                         event_seq: entry.sequence,
                         event_name: entry.event.name().to_string(),
-                        expected,
-                        actual,
+                        expected: Box::new(expected),
+                        actual: Box::new(actual),
                     },
                 ));
             }

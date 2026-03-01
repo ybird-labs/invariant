@@ -51,14 +51,14 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
             }
 
             // JS-7: a promise may belong to only one join set.
-            if let Some(first_js) = state.pid_owner.get(promise_id) {
-                if first_js != join_set_id {
-                    return Err(JournalViolation::PromiseInMultipleJoinSets {
-                        promise_id: promise_id.clone(),
-                        first_js: first_js.clone(),
-                        second_js: join_set_id.clone(),
-                    });
-                }
+            if let Some(first_js) = state.pid_owner.get(promise_id)
+                && first_js != join_set_id
+            {
+                return Err(JournalViolation::PromiseInMultipleJoinSets {
+                    promise_id: Box::new(promise_id.clone()),
+                    first_js: Box::new(first_js.clone()),
+                    second_js: Box::new(join_set_id.clone()),
+                });
             }
         }
         EventType::JoinSetAwaited {
@@ -72,7 +72,7 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
             if !state.submitted_pairs.contains(&pair) {
                 return Err(JournalViolation::AwaitedNotMember {
                     join_set_id: join_set_id.clone(),
-                    promise_id: promise_id.clone(),
+                    promise_id: Box::new(promise_id.clone()),
                     awaited_seq: entry.sequence,
                 });
             }
@@ -89,7 +89,7 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
             if state.consumed_pairs.contains(&pair) {
                 return Err(JournalViolation::DoubleConsume {
                     join_set_id: join_set_id.clone(),
-                    promise_id: promise_id.clone(),
+                    promise_id: Box::new(promise_id.clone()),
                     second_seq: entry.sequence,
                 });
             }
@@ -257,9 +257,9 @@ mod tests {
         assert_eq!(
             err,
             JournalViolation::PromiseInMultipleJoinSets {
-                promise_id,
-                first_js,
-                second_js,
+                promise_id: Box::new(promise_id),
+                first_js: Box::new(first_js),
+                second_js: Box::new(second_js),
             }
         );
     }
@@ -330,7 +330,7 @@ mod tests {
             err,
             JournalViolation::AwaitedNotMember {
                 join_set_id,
-                promise_id,
+                promise_id: Box::new(promise_id),
                 awaited_seq: 9,
             }
         );
@@ -389,7 +389,7 @@ mod tests {
             err,
             JournalViolation::DoubleConsume {
                 join_set_id,
-                promise_id,
+                promise_id: Box::new(promise_id),
                 second_seq: 11,
             }
         );
@@ -469,7 +469,7 @@ mod tests {
             err,
             JournalViolation::AwaitedNotMember {
                 join_set_id,
-                promise_id,
+                promise_id: Box::new(promise_id),
                 awaited_seq: 14,
             }
         );
@@ -529,7 +529,7 @@ mod tests {
             err,
             JournalViolation::DoubleConsume {
                 join_set_id,
-                promise_id,
+                promise_id: Box::new(promise_id),
                 second_seq: 16,
             }
         );

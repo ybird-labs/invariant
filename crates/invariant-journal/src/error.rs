@@ -32,8 +32,8 @@ pub enum JournalViolation {
     AllocatedChildMismatch {
         event_seq: u64,
         event_name: String,
-        expected: PromiseId,
-        actual: PromiseId,
+        expected: Box<PromiseId>,
+        actual: Box<PromiseId>,
     },
 
     /// SE-1: `InvokeStarted` requires a preceding `InvokeScheduled` for the same promise.
@@ -103,7 +103,7 @@ pub enum JournalViolation {
     /// JS-3: `JoinSetAwaited` for a promise requires that promise was previously `JoinSetSubmitted` to the same set.
     AwaitedNotMember {
         join_set_id: JoinSetId,
-        promise_id: PromiseId,
+        promise_id: Box<PromiseId>,
         awaited_seq: u64,
     },
     /// JS-4: `JoinSetAwaited` for a promise requires that promise has a prior `InvokeCompleted`.
@@ -114,7 +114,7 @@ pub enum JournalViolation {
     /// JS-5: No two `JoinSetAwaited` for the same `(join_set_id, promise_id)` pair.
     DoubleConsume {
         join_set_id: JoinSetId,
-        promise_id: PromiseId,
+        promise_id: Box<PromiseId>,
         second_seq: u64,
     },
     /// JS-6: Per set, the number of `JoinSetAwaited` events must not exceed `JoinSetSubmitted` events.
@@ -125,9 +125,9 @@ pub enum JournalViolation {
     },
     /// JS-7: A promise may be submitted to at most one join set.
     PromiseInMultipleJoinSets {
-        promise_id: PromiseId,
-        first_js: JoinSetId,
-        second_js: JoinSetId,
+        promise_id: Box<PromiseId>,
+        first_js: Box<JoinSetId>,
+        second_js: Box<JoinSetId>,
     },
 }
 

@@ -70,7 +70,7 @@ impl ReplayCache {
             }
             EventType::TimeRecorded { promise_id, time } => {
                 self.results
-                    .insert(promise_id.clone(), CachedResult::Time(time.clone()));
+                    .insert(promise_id.clone(), CachedResult::Time(*time));
             }
             EventType::TimerFired { promise_id } => {
                 self.results.insert(promise_id.clone(), CachedResult::Timer);
