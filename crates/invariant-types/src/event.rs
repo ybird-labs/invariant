@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::payload::Payload;
 use crate::promise_id::PromiseId;
-use crate::{ExecutionError, join_set::JoinSetId};
+use crate::{join_set::JoinSetId, ExecutionError};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,15 @@ mod serde_duration {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         let (secs, nanos) = <(u64, u32)>::deserialize(d)?;
+
+        // Guard against `Duration::new` panic on nanosecond-to-second carry overflow.
+        let carry = (nanos / 1_000_000_000) as u64;
+        if secs.checked_add(carry).is_none() {
+            return Err(serde::de::Error::custom(format_args!(
+                "Duration overflow: secs={secs}, nanos={nanos}"
+            )));
+        }
+
         Ok(Duration::new(secs, nanos))
     }
 }
