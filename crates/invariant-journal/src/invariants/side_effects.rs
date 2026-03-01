@@ -9,7 +9,7 @@
 //! `(promise_id, failed_attempt)` pair rather than just `promise_id`,
 //! ensuring that a retry references the exact attempt that was started.
 
-use invariant_types::{ErrorKind, EventType, ExecutionError, JournalEntry};
+use invariant_types::{EventType, JournalEntry};
 
 use crate::error::JournalViolation;
 
@@ -99,7 +99,9 @@ mod tests {
     use super::*;
     use crate::error::JournalViolation;
     use chrono::Utc;
-    use invariant_types::{Codec, EventType, JournalEntry, Payload, PromiseId};
+    use invariant_types::{
+        Codec, ErrorKind, EventType, ExecutionError, JournalEntry, Payload, PromiseId,
+    };
 
     fn pid(tag: u8) -> PromiseId {
         PromiseId::new([tag; 32])

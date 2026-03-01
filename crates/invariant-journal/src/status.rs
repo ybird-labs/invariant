@@ -147,7 +147,7 @@ pub fn can_resume(status: &ExecutionStatus, resolved: &HashSet<PromiseId>) -> bo
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use invariant_types::{Codec, Payload};
+    use invariant_types::{Codec, ExecutionError, Payload};
 
     use super::*;
 
@@ -208,7 +208,7 @@ mod tests {
             entry(
                 5,
                 EventType::ExecutionFailed {
-                    error: "boom".into(),
+                    error: ExecutionError::new(invariant_types::ErrorKind::Uncategorized, "boom"),
                 },
             ),
         ];

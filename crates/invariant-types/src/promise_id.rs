@@ -17,7 +17,61 @@ pub struct PromiseId {
     path: Vec<u32>,
 }
 
-pub type ExecutionId = PromiseId;
+/// A root-level [`PromiseId`] guaranteed to have been derived from
+/// `SHA-256(component_digest, idempotency_key, parent_id)`.
+///
+/// The only public constructor is [`ExecutionId::derive`], which enforces
+/// correctness by construction. Child promises are obtained via
+/// [`ExecutionId::child`], which returns a [`PromiseId`] (not an
+/// `ExecutionId`), correctly modelling the type-level relationship.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExecutionId(PromiseId);
+
+impl ExecutionId {
+    /// Derive a deterministic execution ID from its defining inputs.
+    ///
+    /// Delegates to [`PromiseId::promise_root`] and wraps the result.
+    pub fn derive(
+        component_digest: &[u8],
+        idempotency_key: &str,
+        parent_id: Option<&PromiseId>,
+    ) -> Self {
+        Self(PromiseId::promise_root(
+            component_digest,
+            idempotency_key,
+            parent_id,
+        ))
+    }
+
+    /// Create a child [`PromiseId`] by appending a sequence number.
+    ///
+    /// Returns `Err(MaxCallDepthExceeded)` if the resulting path would
+    /// exceed [`MAX_CALL_DEPTH`].
+    pub fn child(&self, seq: u32) -> Result<PromiseId, DomainError> {
+        self.0.child(seq)
+    }
+
+    /// The raw 32-byte root hash.
+    pub fn root_bytes(&self) -> &[u8; 32] {
+        self.0.root_bytes()
+    }
+
+    /// Borrow the underlying [`PromiseId`] (read-only).
+    pub fn as_promise_id(&self) -> &PromiseId {
+        &self.0
+    }
+
+    /// Consume into the underlying [`PromiseId`].
+    pub fn into_promise_id(self) -> PromiseId {
+        self.0
+    }
+}
+
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 impl PromiseId {
     /// Root-level promise (empty path) from a pre-computed hash.
@@ -45,7 +99,7 @@ impl PromiseId {
 
         if let Some(pid) = parent_id {
             hasher.update((pid.root.len() as u32).to_le_bytes());
-            hasher.update(&pid.root);
+            hasher.update(pid.root);
             hasher.update((pid.path.len() as u32).to_le_bytes());
             for seg in &pid.path {
                 hasher.update(seg.to_le_bytes());
