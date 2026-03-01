@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::payload::Payload;
 use crate::promise_id::PromiseId;
-use crate::{join_set::JoinSetId, ExecutionError};
+use crate::{ExecutionError, join_set::JoinSetId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
