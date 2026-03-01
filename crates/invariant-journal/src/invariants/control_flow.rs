@@ -23,15 +23,18 @@ use super::InvariantState;
 /// This mirrors the SE-4-before-SE-1 pattern in `side_effects`: existence
 /// is checked first because a "consumed twice" error is misleading when
 /// there was never a valid delivery to consume.
-pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), JournalViolation> {
+pub(crate) fn check(
+    state: &InvariantState,
+    entry: &JournalEntry,
+) -> Result<(), Box<JournalViolation>> {
     match &entry.event {
         // CF-1: TimerFired requires prior TimerScheduled for the same promise.
         EventType::TimerFired { promise_id } => {
             if !state.scheduled_timer_pids.contains(promise_id) {
-                return Err(JournalViolation::TimerFiredWithoutScheduled {
+                return Err(Box::new(JournalViolation::TimerFiredWithoutScheduled {
                     promise_id: promise_id.clone(),
                     fired_seq: entry.sequence,
-                });
+                }));
             }
         }
         // CF-2 / CF-3: SignalReceived must match prior delivery and be consumed once.
@@ -47,20 +50,20 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
             match state.delivered_signals.get(&key) {
                 Some(delivered_payload) if delivered_payload == payload => {}
                 _ => {
-                    return Err(JournalViolation::SignalReceivedWithoutDelivery {
+                    return Err(Box::new(JournalViolation::SignalReceivedWithoutDelivery {
                         signal_name: signal_name.clone(),
                         delivery_id: *delivery_id,
                         received_seq: entry.sequence,
-                    });
+                    }));
                 }
             }
 
             if state.consumed_signal_deliveries.contains(&key) {
-                return Err(JournalViolation::SignalConsumedTwice {
+                return Err(Box::new(JournalViolation::SignalConsumedTwice {
                     signal_name: signal_name.clone(),
                     delivery_id: *delivery_id,
                     second_seq: entry.sequence,
-                });
+                }));
             }
         }
         EventType::ExecutionAwaiting { waiting_on, kind } => {
@@ -70,26 +73,26 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                 HashSet::with_capacity(waiting_on.len());
             for pid in waiting_on {
                 if !seen.insert(pid) {
-                    return Err(JournalViolation::AwaitWaitingOnDuplicate {
+                    return Err(Box::new(JournalViolation::AwaitWaitingOnDuplicate {
                         awaiting_seq: entry.sequence,
                         promise_id: pid.clone(),
-                    });
+                    }));
                 }
             }
 
             // CF-4: AwaitKind::Signal must wait on exactly one promise.
             if let AwaitKind::Signal { promise_id, .. } = kind {
                 if waiting_on.len() != 1 {
-                    return Err(JournalViolation::AwaitSignalInconsistent {
+                    return Err(Box::new(JournalViolation::AwaitSignalInconsistent {
                         awaiting_seq: entry.sequence,
                         waiting_on_count: waiting_on.len(),
-                    });
+                    }));
                 }
                 if waiting_on[0] != *promise_id {
-                    return Err(JournalViolation::AwaitSignalInconsistent {
+                    return Err(Box::new(JournalViolation::AwaitSignalInconsistent {
                         awaiting_seq: entry.sequence,
                         waiting_on_count: waiting_on.len(),
-                    });
+                    }));
                 }
             }
         }
@@ -133,7 +136,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::TimerFiredWithoutScheduled {
                 promise_id: p,
                 fired_seq: 2,
@@ -169,7 +172,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::SignalReceivedWithoutDelivery {
                 signal_name: "sig".to_string(),
                 delivery_id: 7,
@@ -198,7 +201,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::SignalReceivedWithoutDelivery {
                 signal_name: "sig".to_string(),
                 delivery_id: 8,
@@ -247,7 +250,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::SignalConsumedTwice {
                 signal_name: "sig".to_string(),
                 delivery_id: 10,
@@ -275,7 +278,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::SignalReceivedWithoutDelivery {
                 signal_name: "sig".to_string(),
                 delivery_id: 11,
@@ -305,7 +308,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::SignalReceivedWithoutDelivery {
                 signal_name: "sig".to_string(),
                 delivery_id: 12,
@@ -330,7 +333,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitSignalInconsistent {
                 awaiting_seq: 10,
                 waiting_on_count: 0,
@@ -354,7 +357,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitSignalInconsistent {
                 awaiting_seq: 11,
                 waiting_on_count: 2,
@@ -407,7 +410,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitWaitingOnDuplicate {
                 awaiting_seq: 15,
                 promise_id: dup,
@@ -429,7 +432,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitWaitingOnDuplicate {
                 awaiting_seq: 16,
                 promise_id: dup,
@@ -454,7 +457,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitWaitingOnDuplicate {
                 awaiting_seq: 17,
                 promise_id: dup,
@@ -478,7 +481,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::AwaitSignalInconsistent {
                 awaiting_seq: 14,
                 waiting_on_count: 1,

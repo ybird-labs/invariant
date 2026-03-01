@@ -2,7 +2,7 @@ use invariant_types::{DomainError, JoinSetId, PromiseId, SignalDeliveryId};
 
 /// Describes a specific journal invariant violation.
 ///
-/// Variants are grouped as Structural (S-1..S-5), Side Effects (SE-1..SE-4),
+/// Variants are grouped as Structural (S-1..S-6), Side Effects (SE-1..SE-4),
 /// Control Flow (CF-1..CF-4), and JoinSet (JS-1..JS-7).
 ///
 /// `AllocatedChildMismatch` is a recovery-time integrity check
@@ -26,7 +26,7 @@ pub enum JournalViolation {
     },
     /// S-5: `ExecutionCancelled` requires a preceding `CancelRequested`.
     CancelledWithoutRequest { cancelled_seq: u64 },
-    /// Recovery check: allocated child promise ID must match deterministic derivation
+    /// S-6: Recovery check — allocated child promise ID must match deterministic derivation
     /// from execution root and allocation sequence.
     AllocatedChildMismatch {
         event_seq: u64,
@@ -136,7 +136,7 @@ pub enum JournalError {
     #[error("journal is empty")]
     EmptyJournal,
     #[error("invariant violation: {0}")]
-    InvariantViolation(JournalViolation),
+    InvariantViolation(Box<JournalViolation>),
     #[error("domain error: {0}")]
     DomainError(DomainError),
 }
@@ -181,7 +181,7 @@ impl std::fmt::Display for JournalViolation {
                 actual,
             } => write!(
                 f,
-                "child allocation mismatch at seq {event_seq} ({event_name}): expected {expected}, got {actual}"
+                "S-6: child allocation mismatch at seq {event_seq} ({event_name}): expected {expected}, got {actual}"
             ),
             Self::StartedWithoutScheduled {
                 promise_id,

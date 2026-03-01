@@ -95,7 +95,7 @@ impl InvariantState {
     ///
     /// Runs all 21 invariant checks against the current accumulated state,
     /// then updates state on success.
-    pub fn check_append(&mut self, entry: &JournalEntry) -> Result<(), JournalViolation> {
+    pub fn check_append(&mut self, entry: &JournalEntry) -> Result<(), Box<JournalViolation>> {
         structural::check(self, entry)?;
         side_effects::check(self, entry)?;
         control_flow::check(self, entry)?;
@@ -116,16 +116,16 @@ impl InvariantState {
         violations: &mut Vec<JournalViolation>,
     ) {
         if let Err(v) = structural::check(self, entry) {
-            violations.push(v);
+            violations.push(*v);
         }
         if let Err(v) = side_effects::check(self, entry) {
-            violations.push(v);
+            violations.push(*v);
         }
         if let Err(v) = control_flow::check(self, entry) {
-            violations.push(v);
+            violations.push(*v);
         }
         if let Err(v) = join_set::check(self, entry) {
-            violations.push(v);
+            violations.push(*v);
         }
     }
 

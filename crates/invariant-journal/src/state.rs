@@ -104,11 +104,11 @@ impl ExecutionState {
             ..
         } = first.event
         else {
-            return Err(JournalError::InvariantViolation(
+            return Err(JournalError::InvariantViolation(Box::new(
                 JournalViolation::MissingExecutionStarted {
                     first_event: first.event.name().into(),
                 },
-            ));
+            )));
         };
         let execution_id =
             ExecutionId::derive(component_digest, idempotency_key, parent_id.as_ref());
@@ -271,14 +271,14 @@ fn build_child_state(
                 .map_err(JournalError::DomainError)?;
 
             if actual != expected {
-                return Err(JournalError::InvariantViolation(
+                return Err(JournalError::InvariantViolation(Box::new(
                     JournalViolation::AllocatedChildMismatch {
                         event_seq: entry.sequence,
                         event_name: entry.event.name().to_string(),
                         expected,
                         actual,
                     },
-                ));
+                )));
             }
 
             allocated_children.insert(actual);
@@ -464,7 +464,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::CancelledWithoutRequest { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::CancelledWithoutRequest { .. })
         ));
         // State unchanged — no mutation on validation failure
         assert_eq!(*state.status(), ExecutionStatus::Running);
@@ -976,7 +976,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::SubmitWithoutCreate { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::SubmitWithoutCreate { .. })
         ));
     }
 
@@ -1002,7 +1002,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::StartedWithoutScheduled { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::StartedWithoutScheduled { .. })
         ));
         assert_eq!(state.journal().len(), 1);
         assert_eq!(*state.status(), ExecutionStatus::Running);
@@ -1028,7 +1028,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::MultipleTerminalEvents { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::MultipleTerminalEvents { .. })
         ));
         assert_eq!(state.journal().len(), 2);
         assert_eq!(*state.status(), ExecutionStatus::Completed);
@@ -1053,7 +1053,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::TimerFiredWithoutScheduled { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::TimerFiredWithoutScheduled { .. })
         ));
         assert_eq!(state.journal().len(), 1);
         assert_eq!(*state.status(), ExecutionStatus::Running);
@@ -1142,7 +1142,7 @@ mod tests {
 
         assert!(matches!(
             err,
-            JournalError::InvariantViolation(JournalViolation::NonMonotonicSequence { .. })
+            JournalError::InvariantViolation(v) if matches!(*v, JournalViolation::NonMonotonicSequence { .. })
         ));
     }
 

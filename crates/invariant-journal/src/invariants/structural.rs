@@ -15,25 +15,28 @@ use invariant_types::{EventType, JournalEntry};
 /// (S-2) are verified before terminal-event rules (S-3/S-4/S-5), since the
 /// latter depend on coherent sequence numbering. Within the terminal group,
 /// S-3 (duplicate terminal) takes precedence over S-4 (post-terminal append).
-pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), JournalViolation> {
+pub(crate) fn check(
+    state: &InvariantState,
+    entry: &JournalEntry,
+) -> Result<(), Box<JournalViolation>> {
     // S-1: Sequence numbers must equal their 0-based array index.
     // `state.len` is the count of entries already ingested, so the next
     // entry must carry `sequence == len`.
     debug_assert!(state.len <= u64::MAX as usize);
     let expected = state.len as u64;
     if entry.sequence != expected {
-        return Err(JournalViolation::NonMonotonicSequence {
+        return Err(Box::new(JournalViolation::NonMonotonicSequence {
             entry_index: state.len,
             expected,
             actual: entry.sequence,
-        });
+        }));
     }
 
     // S-2: The very first event must be `ExecutionStarted`.
     if state.len == 0 && !matches!(entry.event, EventType::ExecutionStarted { .. }) {
-        return Err(JournalViolation::MissingExecutionStarted {
+        return Err(Box::new(JournalViolation::MissingExecutionStarted {
             first_event: entry.event.name().to_string(),
-        });
+        }));
     }
 
     // S-3 / S-4: Terminal event finality.
@@ -42,22 +45,22 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
     //   - A non-terminal is a "terminal not last" violation (S-4).
     if let Some(first_at) = state.terminal_seq {
         if entry.event.is_terminal() {
-            return Err(JournalViolation::MultipleTerminalEvents {
+            return Err(Box::new(JournalViolation::MultipleTerminalEvents {
                 first_at,
                 second_at: entry.sequence,
-            });
+            }));
         }
-        return Err(JournalViolation::TerminalNotLast {
+        return Err(Box::new(JournalViolation::TerminalNotLast {
             terminal_seq: first_at,
             journal_len: state.len.saturating_add(1),
-        });
+        }));
     }
 
     // S-5: `ExecutionCancelled` requires a prior `CancelRequested`.
     if matches!(entry.event, EventType::ExecutionCancelled { .. }) && !state.has_cancel_requested {
-        return Err(JournalViolation::CancelledWithoutRequest {
+        return Err(Box::new(JournalViolation::CancelledWithoutRequest {
             cancelled_seq: entry.sequence,
-        });
+        }));
     }
 
     Ok(())
@@ -121,7 +124,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::NonMonotonicSequence {
                 entry_index: 1,
                 expected: 1,
@@ -137,7 +140,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::MissingExecutionStarted {
                 first_event: "ExecutionCompleted".to_string(),
             }
@@ -155,7 +158,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::MultipleTerminalEvents {
                 first_at: 3,
                 second_at: 5,
@@ -174,7 +177,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::TerminalNotLast {
                 terminal_seq: 3,
                 journal_len: 5,
@@ -193,7 +196,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::CancelledWithoutRequest { cancelled_seq: 2 }
         );
     }
@@ -204,7 +207,10 @@ mod tests {
         let entry = mk_entry(42, completed_event());
 
         let err = check(&state, &entry).unwrap_err();
-        assert!(matches!(err, JournalViolation::NonMonotonicSequence { .. }));
+        assert!(matches!(
+            *err,
+            JournalViolation::NonMonotonicSequence { .. }
+        ));
     }
 
     #[test]
@@ -218,7 +224,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert!(matches!(
-            err,
+            *err,
             JournalViolation::MultipleTerminalEvents { .. }
         ));
     }
@@ -235,7 +241,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert!(matches!(
-            err,
+            *err,
             JournalViolation::MultipleTerminalEvents { .. }
         ));
     }
