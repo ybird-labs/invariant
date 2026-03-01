@@ -11,6 +11,10 @@ use invariant_types::{
 /// Commands that allocate a new PromiseId omit it — the aggregate
 /// assigns it from `next_child_seq`. Commands that reference an
 /// existing promise carry the PromiseId explicitly.
+///
+/// Use [`classify()`](Self::classify) to decompose into
+/// [`AllocatingCommand`] or [`NonAllocatingCommand`] for type-safe
+/// conversion to events.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     // Lifecycle (4)
@@ -90,18 +94,218 @@ pub enum Command {
         result: Payload,
     },
 }
+
 impl Command {
-    pub fn is_allocating(&self) -> bool {
-        matches!(
-            self,
-            Self::ScheduleInvoke { .. }
-                | Self::CaptureRandom { .. }
-                | Self::CaptureTime { .. }
-                | Self::ScheduleTimer { .. }
-                | Self::ConsumeSignal { .. }
-                | Self::CreateJoinSet
-        )
+    /// Decompose into [`CommandKind`], separating allocating commands
+    /// (which need an aggregate-assigned [`PromiseId`]) from
+    /// non-allocating commands (which carry their own or need none).
+    ///
+    /// This replaces the runtime `is_allocating()` check with a
+    /// compile-time type distinction.
+    pub(crate) fn classify(self) -> CommandKind {
+        match self {
+            // ── Allocating (6) ──
+            Command::ScheduleInvoke {
+                kind,
+                function_name,
+                input,
+                retry_policy,
+            } => CommandKind::Allocating(AllocatingCommand::ScheduleInvoke {
+                kind,
+                function_name,
+                input,
+                retry_policy,
+            }),
+            Command::CaptureRandom { value } => {
+                CommandKind::Allocating(AllocatingCommand::CaptureRandom { value })
+            }
+            Command::CaptureTime { time } => {
+                CommandKind::Allocating(AllocatingCommand::CaptureTime { time })
+            }
+            Command::ScheduleTimer { duration, fire_at } => {
+                CommandKind::Allocating(AllocatingCommand::ScheduleTimer { duration, fire_at })
+            }
+            Command::ConsumeSignal {
+                signal_name,
+                payload,
+                delivery_id,
+            } => CommandKind::Allocating(AllocatingCommand::ConsumeSignal {
+                signal_name,
+                payload,
+                delivery_id,
+            }),
+            Command::CreateJoinSet => CommandKind::Allocating(AllocatingCommand::CreateJoinSet),
+            // ── Non-allocating (13) ──
+            Command::Complete { result } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::Complete { result })
+            }
+            Command::Fail { error } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::Fail { error })
+            }
+            Command::RequestCancel { reason } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::RequestCancel { reason })
+            }
+            Command::Cancel { reason } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::Cancel { reason })
+            }
+            Command::StartInvoke {
+                promise_id,
+                attempt,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::StartInvoke {
+                promise_id,
+                attempt,
+            }),
+            Command::CompleteInvoke {
+                promise_id,
+                result,
+                attempt,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::CompleteInvoke {
+                promise_id,
+                result,
+                attempt,
+            }),
+            Command::RetryInvoke {
+                promise_id,
+                failed_attempt,
+                error,
+                retry_at,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::RetryInvoke {
+                promise_id,
+                failed_attempt,
+                error,
+                retry_at,
+            }),
+            Command::FireTimer { promise_id } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::FireTimer { promise_id })
+            }
+            Command::DeliverSignal {
+                signal_name,
+                payload,
+                delivery_id,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::DeliverSignal {
+                signal_name,
+                payload,
+                delivery_id,
+            }),
+            Command::Await { waiting_on, kind } => {
+                CommandKind::NonAllocating(NonAllocatingCommand::Await { waiting_on, kind })
+            }
+            Command::Resume => CommandKind::NonAllocating(NonAllocatingCommand::Resume),
+            Command::SubmitToJoinSet {
+                join_set_id,
+                promise_id,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::SubmitToJoinSet {
+                join_set_id,
+                promise_id,
+            }),
+            Command::ConsumeFromJoinSet {
+                join_set_id,
+                promise_id,
+                result,
+            } => CommandKind::NonAllocating(NonAllocatingCommand::ConsumeFromJoinSet {
+                join_set_id,
+                promise_id,
+                result,
+            }),
+        }
     }
+}
+
+/// Result of [`classify()`](Command::classify): either an allocating or
+/// non-allocating command, ready for type-safe event conversion.
+pub(crate) enum CommandKind {
+    Allocating(AllocatingCommand),
+    NonAllocating(NonAllocatingCommand),
+}
+
+/// Commands that require the aggregate to assign a new [`PromiseId`].
+///
+/// The 6 allocating commands omit their promise ID — the aggregate
+/// derives it from `execution_id + next_child_seq` before converting
+/// to an event via [`allocating_to_event`].
+pub(crate) enum AllocatingCommand {
+    ScheduleInvoke {
+        kind: InvokeKind,
+        function_name: String,
+        input: Payload,
+        retry_policy: Option<RetryPolicy>,
+    },
+    CaptureRandom {
+        value: Vec<u8>,
+    },
+    CaptureTime {
+        time: DateTime<Utc>,
+    },
+    ScheduleTimer {
+        duration: Duration,
+        fire_at: DateTime<Utc>,
+    },
+    ConsumeSignal {
+        signal_name: String,
+        payload: Payload,
+        delivery_id: SignalDeliveryId,
+    },
+    CreateJoinSet,
+}
+
+/// Commands that reference existing promises or need no promise ID at all.
+///
+/// The 13 non-allocating commands carry their own [`PromiseId`] (if any)
+/// and convert to events via [`non_allocating_to_event`].
+pub(crate) enum NonAllocatingCommand {
+    // Lifecycle (4)
+    Complete {
+        result: Payload,
+    },
+    Fail {
+        error: ExecutionError,
+    },
+    RequestCancel {
+        reason: String,
+    },
+    Cancel {
+        reason: String,
+    },
+    // Side Effects — referencing (3)
+    StartInvoke {
+        promise_id: PromiseId,
+        attempt: u32,
+    },
+    CompleteInvoke {
+        promise_id: PromiseId,
+        result: Payload,
+        attempt: u32,
+    },
+    RetryInvoke {
+        promise_id: PromiseId,
+        failed_attempt: u32,
+        error: ExecutionError,
+        retry_at: DateTime<Utc>,
+    },
+    // Control Flow — referencing (3)
+    FireTimer {
+        promise_id: PromiseId,
+    },
+    DeliverSignal {
+        signal_name: String,
+        payload: Payload,
+        delivery_id: SignalDeliveryId,
+    },
+    Await {
+        waiting_on: Vec<PromiseId>,
+        kind: AwaitKind,
+    },
+    Resume,
+    // Concurrency — referencing (2)
+    SubmitToJoinSet {
+        join_set_id: JoinSetId,
+        promise_id: PromiseId,
+    },
+    ConsumeFromJoinSet {
+        join_set_id: JoinSetId,
+        promise_id: PromiseId,
+        result: Payload,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -110,54 +314,72 @@ pub struct CommandResult {
     pub allocated_id: Option<PromiseId>,
 }
 
-/// Convert a [`Command`] into its corresponding [`EventType`].
+/// Convert an [`AllocatingCommand`] and its aggregate-assigned [`PromiseId`]
+/// into the corresponding [`EventType`].
 ///
-/// Pure function — no state access. Allocating commands pull their
-/// `PromiseId` from `allocated_id`; non-allocating commands either
-/// carry their own or have none.
-///
-/// # Panics
-///
-/// Panics if `allocated_id` is `None` for an allocating command.
-/// This is a programming error — callers must pair [`Command::is_allocating`]
-/// with ID generation before calling this function.
-pub(crate) fn command_to_event(cmd: Command, allocated_id: Option<&PromiseId>) -> EventType {
-    /// Clone the allocated ID or panic. Only called for the 6 allocating
-    /// commands, where `handle()` guarantees `Some`.
-    fn take_allocated(allocated_id: Option<&PromiseId>) -> PromiseId {
-        allocated_id
-            .expect("allocating command must have allocated_id")
-            .clone()
-    }
-
+/// Infallible — the type signature guarantees the ID is present.
+pub(crate) fn allocating_to_event(cmd: AllocatingCommand, allocated_id: PromiseId) -> EventType {
     match cmd {
-        // ── Lifecycle ──
-        Command::Complete { result } => EventType::ExecutionCompleted { result },
-        Command::Fail { error } => EventType::ExecutionFailed { error },
-        Command::RequestCancel { reason } => EventType::CancelRequested { reason },
-        Command::Cancel { reason } => EventType::ExecutionCancelled { reason },
-
-        // ── Side Effects ──
-        Command::ScheduleInvoke {
+        AllocatingCommand::ScheduleInvoke {
             kind,
             function_name,
             input,
             retry_policy,
         } => EventType::InvokeScheduled {
-            promise_id: take_allocated(allocated_id),
+            promise_id: allocated_id,
             kind,
             function_name,
             input,
             retry_policy,
         },
-        Command::StartInvoke {
+        AllocatingCommand::CaptureRandom { value } => EventType::RandomGenerated {
+            promise_id: allocated_id,
+            value,
+        },
+        AllocatingCommand::CaptureTime { time } => EventType::TimeRecorded {
+            promise_id: allocated_id,
+            time,
+        },
+        AllocatingCommand::ScheduleTimer { duration, fire_at } => EventType::TimerScheduled {
+            promise_id: allocated_id,
+            duration,
+            fire_at,
+        },
+        AllocatingCommand::ConsumeSignal {
+            signal_name,
+            payload,
+            delivery_id,
+        } => EventType::SignalReceived {
+            promise_id: allocated_id,
+            signal_name,
+            payload,
+            delivery_id,
+        },
+        AllocatingCommand::CreateJoinSet => EventType::JoinSetCreated {
+            join_set_id: JoinSetId(allocated_id),
+        },
+    }
+}
+
+/// Convert a [`NonAllocatingCommand`] into the corresponding [`EventType`].
+///
+/// Infallible — no external ID needed; referencing commands carry their own.
+pub(crate) fn non_allocating_to_event(cmd: NonAllocatingCommand) -> EventType {
+    match cmd {
+        // ── Lifecycle ──
+        NonAllocatingCommand::Complete { result } => EventType::ExecutionCompleted { result },
+        NonAllocatingCommand::Fail { error } => EventType::ExecutionFailed { error },
+        NonAllocatingCommand::RequestCancel { reason } => EventType::CancelRequested { reason },
+        NonAllocatingCommand::Cancel { reason } => EventType::ExecutionCancelled { reason },
+        // ── Side Effects ──
+        NonAllocatingCommand::StartInvoke {
             promise_id,
             attempt,
         } => EventType::InvokeStarted {
             promise_id,
             attempt,
         },
-        Command::CompleteInvoke {
+        NonAllocatingCommand::CompleteInvoke {
             promise_id,
             result,
             attempt,
@@ -166,7 +388,7 @@ pub(crate) fn command_to_event(cmd: Command, allocated_id: Option<&PromiseId>) -
             result,
             attempt,
         },
-        Command::RetryInvoke {
+        NonAllocatingCommand::RetryInvoke {
             promise_id,
             failed_attempt,
             error,
@@ -177,25 +399,9 @@ pub(crate) fn command_to_event(cmd: Command, allocated_id: Option<&PromiseId>) -
             error,
             retry_at,
         },
-
-        // ── Nondeterminism ──
-        Command::CaptureRandom { value } => EventType::RandomGenerated {
-            promise_id: take_allocated(allocated_id),
-            value,
-        },
-        Command::CaptureTime { time } => EventType::TimeRecorded {
-            promise_id: take_allocated(allocated_id),
-            time,
-        },
-
         // ── Control Flow ──
-        Command::ScheduleTimer { duration, fire_at } => EventType::TimerScheduled {
-            promise_id: take_allocated(allocated_id),
-            duration,
-            fire_at,
-        },
-        Command::FireTimer { promise_id } => EventType::TimerFired { promise_id },
-        Command::DeliverSignal {
+        NonAllocatingCommand::FireTimer { promise_id } => EventType::TimerFired { promise_id },
+        NonAllocatingCommand::DeliverSignal {
             signal_name,
             payload,
             delivery_id,
@@ -204,31 +410,19 @@ pub(crate) fn command_to_event(cmd: Command, allocated_id: Option<&PromiseId>) -
             payload,
             delivery_id,
         },
-        Command::ConsumeSignal {
-            signal_name,
-            payload,
-            delivery_id,
-        } => EventType::SignalReceived {
-            promise_id: take_allocated(allocated_id),
-            signal_name,
-            payload,
-            delivery_id,
-        },
-        Command::Await { waiting_on, kind } => EventType::ExecutionAwaiting { waiting_on, kind },
-        Command::Resume => EventType::ExecutionResumed,
-
+        NonAllocatingCommand::Await { waiting_on, kind } => {
+            EventType::ExecutionAwaiting { waiting_on, kind }
+        }
+        NonAllocatingCommand::Resume => EventType::ExecutionResumed,
         // ── Concurrency ──
-        Command::CreateJoinSet => EventType::JoinSetCreated {
-            join_set_id: JoinSetId(take_allocated(allocated_id)),
-        },
-        Command::SubmitToJoinSet {
+        NonAllocatingCommand::SubmitToJoinSet {
             join_set_id,
             promise_id,
         } => EventType::JoinSetSubmitted {
             join_set_id,
             promise_id,
         },
-        Command::ConsumeFromJoinSet {
+        NonAllocatingCommand::ConsumeFromJoinSet {
             join_set_id,
             promise_id,
             result,

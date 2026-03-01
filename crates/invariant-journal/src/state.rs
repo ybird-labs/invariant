@@ -6,7 +6,7 @@ use invariant_types::{
 };
 
 use crate::{
-    command::{command_to_event, Command, CommandResult},
+    command::{allocating_to_event, non_allocating_to_event, Command, CommandKind, CommandResult},
     error::{JournalError, JournalViolation},
     invariants::InvariantState,
     replay::ReplayCache,
@@ -143,13 +143,19 @@ impl ExecutionState {
     ///
     /// No state mutation occurs until every validation step succeeds:
     ///
-    /// 1. **Derive child ID** (read-only peek at counter + execution root).
-    /// 2. **Build event & entry** from the command.
-    /// 3. **Invariant check** via [`InvariantState::check_append`].
-    /// 4. **Commit** — counter advance, child set insert, status transition,
+    /// 1. **Classify** the command into [`AllocatingCommand`] or
+    ///    [`NonAllocatingCommand`] via [`Command::classify`].
+    /// 2. **Derive child ID** for allocating commands (read-only peek
+    ///    at counter + execution root).
+    /// 3. **Build event & entry** — allocating commands use
+    ///    [`allocating_to_event`] (takes `PromiseId` by value),
+    ///    non-allocating commands use [`non_allocating_to_event`].
+    ///    Both are infallible — the type system guarantees correctness.
+    /// 4. **Invariant check** via [`InvariantState::check_append`].
+    /// 5. **Commit** — counter advance, child set insert, status transition,
     ///    replay cache update, journal append.
     ///
-    /// If step 3 fails, the only state that could have changed is
+    /// If step 4 fails, the only state that could have changed is
     /// `InvariantState` — but `check_append` does not call `apply_entry`
     /// on failure, so no rollback is needed.
     ///
@@ -164,25 +170,28 @@ impl ExecutionState {
         cmd: Command,
         now: DateTime<Utc>,
     ) -> Result<CommandResult, JournalError> {
-        // 1. Pre-validate all fallible operations — no state mutation.
-        //    The permit proves overflow was checked; it will be consumed
-        //    in the infallible commit phase.
-        let (allocated_id, permit) = if cmd.is_allocating() {
-            let permit = self
-                .next_child_seq
-                .check_advance()
-                .map_err(JournalError::DomainError)?;
-            let child_id = self
-                .execution_id
-                .child(self.next_child_seq.current())
-                .map_err(JournalError::DomainError)?;
-            (Some(child_id), Some(permit))
-        } else {
-            (None, None)
+        // 1. Classify the command, then derive child ID + build event.
+        //    No state mutation until all validation succeeds.
+        let (event, allocated_id, permit) = match cmd.classify() {
+            CommandKind::Allocating(alloc_cmd) => {
+                let permit = self
+                    .next_child_seq
+                    .check_advance()
+                    .map_err(JournalError::DomainError)?;
+                let child_id = self
+                    .execution_id
+                    .child(self.next_child_seq.current())
+                    .map_err(JournalError::DomainError)?;
+                let event = allocating_to_event(alloc_cmd, child_id.clone());
+                (event, Some(child_id), Some(permit))
+            }
+            CommandKind::NonAllocating(ref_cmd) => {
+                let event = non_allocating_to_event(ref_cmd);
+                (event, None, None)
+            }
         };
 
-        // 2. Build event and entry.
-        let event = command_to_event(cmd, allocated_id.as_ref());
+        // 2. Build journal entry.
         let entry = JournalEntry {
             sequence: self.journal.len() as u64,
             timestamp: now,
