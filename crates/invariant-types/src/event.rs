@@ -1,14 +1,35 @@
-use crate::join_set::JoinSetId;
+use std::time::Duration;
+
 use crate::payload::Payload;
 use crate::promise_id::PromiseId;
-use chrono::{DateTime, Duration, Utc};
+use crate::{ExecutionError, join_set::JoinSetId};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+mod serde_duration {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        (d.as_secs(), d.subsec_nanos()).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let (secs, nanos) = <(u64, u32)>::deserialize(d)?;
+
+        // Guard against `Duration::new` panic on nanosecond-to-second carry overflow.
+        let carry = (nanos / 1_000_000_000) as u64;
+        if secs.checked_add(carry).is_none() {
+            return Err(serde::de::Error::custom(format_args!(
+                "Duration overflow: secs={secs}, nanos={nanos}"
+            )));
+        }
+
+        Ok(Duration::new(secs, nanos))
+    }
+}
+
 /// Categorizes the type of side-effect invocation.
-///
-/// Extensible: new side effect types (DB queries, gRPC calls) are added as
-/// variants here, not as new event types. All share the same 3-phase
-/// Scheduled → Started → Completed structure.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvokeKind {
     /// Function/task/workflow invocation.
@@ -27,10 +48,7 @@ pub enum AwaitKind {
     /// Wait for all promises (JoinSet js.all()).
     All,
     /// Wait for a named signal.
-    Signal {
-        name: String,
-        promise_id: PromiseId,
-    },
+    Signal { name: String, promise_id: PromiseId },
 }
 
 // Retry policy for invocations.
@@ -58,7 +76,7 @@ pub enum EventType {
     /// Function returned Ok (terminal).
     ExecutionCompleted { result: Payload },
     /// Function returned Err or WASM trap (terminal).
-    ExecutionFailed { error: String },
+    ExecutionFailed { error: ExecutionError },
     /// External cancel signal arrived. Transitions to Cancelling.
     CancelRequested { reason: String },
     /// Cancellation finalized after cleanup (terminal). Requires preceding CancelRequested.
@@ -86,7 +104,7 @@ pub enum EventType {
     InvokeRetrying {
         promise_id: PromiseId,
         failed_attempt: u32,
-        error: String,
+        error: ExecutionError,
         retry_at: DateTime<Utc>,
     },
 
@@ -107,6 +125,7 @@ pub enum EventType {
     /// `sleep(duration)` called. Records both the requested duration and computed fire time.
     TimerScheduled {
         promise_id: PromiseId,
+        #[serde(with = "serde_duration")]
         duration: Duration,
         fire_at: DateTime<Utc>,
     },

@@ -21,24 +21,27 @@ use super::InvariantState;
 /// predecessor checks (SE-1, SE-2, SE-3). This precedence prevents
 /// misleading "missing predecessor" errors when the real problem is that
 /// the promise lifecycle has already terminated.
-pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), JournalViolation> {
+pub(crate) fn check(
+    state: &InvariantState,
+    entry: &JournalEntry,
+) -> Result<(), Box<JournalViolation>> {
     match &entry.event {
         // InvokeStarted: SE-4 (finality) then SE-1 (requires prior Scheduled).
         EventType::InvokeStarted { promise_id, .. } => {
             // SE-4: reject if this promise already completed.
             if state.completed_pids.contains(promise_id) {
-                return Err(JournalViolation::EventAfterCompleted {
+                return Err(Box::new(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
                     offending_seq: entry.sequence,
                     offending_event: entry.event.name().to_string(),
-                });
+                }));
             }
             // SE-1: Started requires a preceding Scheduled for the same promise.
             if !state.scheduled_pids.contains(promise_id) {
-                return Err(JournalViolation::StartedWithoutScheduled {
+                return Err(Box::new(JournalViolation::StartedWithoutScheduled {
                     promise_id: promise_id.clone(),
                     started_seq: entry.sequence,
-                });
+                }));
             }
         }
         // InvokeCompleted: SE-2 (requires prior Started) then SE-4 (no duplicate).
@@ -47,18 +50,18 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
         EventType::InvokeCompleted { promise_id, .. } => {
             // SE-2: Completed requires a preceding Started for the same promise.
             if !state.started_pids.contains(promise_id) {
-                return Err(JournalViolation::CompletedWithoutStarted {
+                return Err(Box::new(JournalViolation::CompletedWithoutStarted {
                     promise_id: promise_id.clone(),
                     completed_seq: entry.sequence,
-                });
+                }));
             }
             // SE-4: reject duplicate Completed for an already-completed promise.
             if state.completed_pids.contains(promise_id) {
-                return Err(JournalViolation::EventAfterCompleted {
+                return Err(Box::new(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
                     offending_seq: entry.sequence,
                     offending_event: entry.event.name().to_string(),
-                });
+                }));
             }
         }
         // InvokeRetrying: SE-4 (finality) then SE-3 (requires matching Started attempt).
@@ -69,11 +72,11 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
         } => {
             // SE-4: reject if this promise already completed.
             if state.completed_pids.contains(promise_id) {
-                return Err(JournalViolation::EventAfterCompleted {
+                return Err(Box::new(JournalViolation::EventAfterCompleted {
                     promise_id: promise_id.clone(),
                     offending_seq: entry.sequence,
                     offending_event: entry.event.name().to_string(),
-                });
+                }));
             }
             // SE-3: Retrying requires a Started with the exact (promise_id, attempt) pair.
             // Stricter than Quint (which checks promise_id only) — ensures the
@@ -82,11 +85,11 @@ pub(crate) fn check(state: &InvariantState, entry: &JournalEntry) -> Result<(), 
                 .started_attempts
                 .contains(&(promise_id.clone(), *failed_attempt))
             {
-                return Err(JournalViolation::RetryingWithoutStarted {
+                return Err(Box::new(JournalViolation::RetryingWithoutStarted {
                     promise_id: promise_id.clone(),
                     failed_attempt: *failed_attempt,
                     retrying_seq: entry.sequence,
-                });
+                }));
             }
         }
         _ => {}
@@ -99,7 +102,9 @@ mod tests {
     use super::*;
     use crate::error::JournalViolation;
     use chrono::Utc;
-    use invariant_types::{Codec, EventType, JournalEntry, Payload, PromiseId};
+    use invariant_types::{
+        Codec, ErrorKind, EventType, ExecutionError, JournalEntry, Payload, PromiseId,
+    };
 
     fn pid(tag: u8) -> PromiseId {
         PromiseId::new([tag; 32])
@@ -132,7 +137,7 @@ mod tests {
         );
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::EventAfterCompleted {
                 promise_id: p,
                 offending_seq: 3,
@@ -152,13 +157,13 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p.clone(),
                 failed_attempt: 1,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::EventAfterCompleted {
                 promise_id: p,
                 offending_seq: 4,
@@ -184,7 +189,7 @@ mod tests {
         );
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::CompletedWithoutStarted {
                 promise_id: p,
                 completed_seq: 4,
@@ -206,7 +211,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::StartedWithoutScheduled {
                 promise_id: p,
                 started_seq: 2,
@@ -247,7 +252,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::CompletedWithoutStarted {
                 promise_id: p,
                 completed_seq: 4,
@@ -293,7 +298,7 @@ mod tests {
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::EventAfterCompleted {
                 promise_id: p,
                 offending_seq: 6,
@@ -356,14 +361,14 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p.clone(),
                 failed_attempt: 1,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );
 
         let err = check(&state, &entry).unwrap_err();
         assert_eq!(
-            err,
+            *err,
             JournalViolation::RetryingWithoutStarted {
                 promise_id: p,
                 failed_attempt: 1,
@@ -385,7 +390,7 @@ mod tests {
             EventType::InvokeRetrying {
                 promise_id: p,
                 failed_attempt: 2,
-                error: "boom".to_string(),
+                error: ExecutionError::new(ErrorKind::Uncategorized, "boom"),
                 retry_at: Utc::now(),
             },
         );

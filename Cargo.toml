@@ -2,6 +2,8 @@
 resolver = "3"
 members = [
     "crates/invariant-engine",
+    "crates/invariant-journal",
+    "crates/invariant-types",
 ]
 
 [workspace.dependencies]
@@ -21,3 +23,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 wasmtime = "38.0.3"
 wasmtime-wasi = "38.0.3"
 wit-bindgen = "0.24.0"
+# Testing
+insta = { version = "1.46", features = ["json", "yaml"] }
+similar-asserts = "1"
+test-log = { version = "0.2", features = ["trace"] }

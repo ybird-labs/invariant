@@ -1,10 +1,12 @@
-use invariant_types::{JoinSetId, PromiseId, SignalDeliveryId};
+use invariant_types::{DomainError, JoinSetId, PromiseId, SignalDeliveryId};
 
 /// Describes a specific journal invariant violation.
 ///
-/// Each variant maps 1:1 to a formal invariant from the Quint spec.
-/// Grouped: Structural (S-1..S-5), Side Effects (SE-1..SE-4),
-/// Control Flow (CF-1..CF-4), JoinSet (JS-1..JS-7).
+/// Variants are grouped as Structural (S-1..S-6), Side Effects (SE-1..SE-4),
+/// Control Flow (CF-1..CF-4), and JoinSet (JS-1..JS-7).
+///
+/// `AllocatedChildMismatch` is a recovery-time integrity check
+/// that ensures recovered allocated child IDs match deterministic derivation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JournalViolation {
     /// S-1: Sequence numbers must equal their array index (0-indexed, strict equality).
@@ -24,6 +26,14 @@ pub enum JournalViolation {
     },
     /// S-5: `ExecutionCancelled` requires a preceding `CancelRequested`.
     CancelledWithoutRequest { cancelled_seq: u64 },
+    /// S-6: Recovery check — allocated child promise ID must match deterministic derivation
+    /// from execution root and allocation sequence.
+    AllocatedChildMismatch {
+        event_seq: u64,
+        event_name: String,
+        expected: PromiseId,
+        actual: PromiseId,
+    },
 
     /// SE-1: `InvokeStarted` requires a preceding `InvokeScheduled` for the same promise.
     StartedWithoutScheduled {
@@ -126,7 +136,9 @@ pub enum JournalError {
     #[error("journal is empty")]
     EmptyJournal,
     #[error("invariant violation: {0}")]
-    InvariantViolation(JournalViolation),
+    InvariantViolation(Box<JournalViolation>),
+    #[error("domain error: {0}")]
+    DomainError(DomainError),
 }
 
 impl std::fmt::Display for JournalViolation {
@@ -161,6 +173,15 @@ impl std::fmt::Display for JournalViolation {
             Self::CancelledWithoutRequest { cancelled_seq } => write!(
                 f,
                 "S-5: ExecutionCancelled at seq {cancelled_seq} without prior CancelRequested"
+            ),
+            Self::AllocatedChildMismatch {
+                event_seq,
+                event_name,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "S-6: child allocation mismatch at seq {event_seq} ({event_name}): expected {expected}, got {actual}"
             ),
             Self::StartedWithoutScheduled {
                 promise_id,

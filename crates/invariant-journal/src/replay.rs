@@ -30,6 +30,12 @@ pub struct ReplayCache {
 }
 
 impl ReplayCache {
+    pub fn new() -> Self {
+        Self {
+            results: HashMap::new(),
+        }
+    }
+
     /// Build cache entries from a full journal history in one pass.
     ///
     /// Cached event kinds:
@@ -43,36 +49,43 @@ impl ReplayCache {
     /// - `SignalDelivered` (no `promise_id`)
     /// - `JoinSetAwaited` (consumed via sequence scan, not map lookup)
     pub fn build(entries: &[JournalEntry]) -> Self {
-        let mut results = HashMap::new();
-
+        let mut replay_cache = ReplayCache::new();
         for entry in entries {
-            match &entry.event {
-                EventType::InvokeCompleted {
-                    promise_id, result, ..
-                } => {
-                    results.insert(promise_id.clone(), CachedResult::Invoke(result.clone()));
-                }
-                EventType::RandomGenerated { promise_id, value } => {
-                    results.insert(promise_id.clone(), CachedResult::Random(value.clone()));
-                }
-                EventType::TimeRecorded { promise_id, time } => {
-                    results.insert(promise_id.clone(), CachedResult::Time(time.clone()));
-                }
-                EventType::TimerFired { promise_id } => {
-                    results.insert(promise_id.clone(), CachedResult::Timer);
-                }
-                EventType::SignalReceived {
-                    promise_id,
-                    payload,
-                    ..
-                } => {
-                    results.insert(promise_id.clone(), CachedResult::Signal(payload.clone()));
-                }
-                _ => {}
-            }
+            replay_cache.insert_event(entry);
         }
+        replay_cache
+    }
 
-        Self { results }
+    /// Index a single journal entry into the cache.
+    pub fn insert_event(&mut self, entry: &JournalEntry) {
+        match &entry.event {
+            EventType::InvokeCompleted {
+                promise_id, result, ..
+            } => {
+                self.results
+                    .insert(promise_id.clone(), CachedResult::Invoke(result.clone()));
+            }
+            EventType::RandomGenerated { promise_id, value } => {
+                self.results
+                    .insert(promise_id.clone(), CachedResult::Random(value.clone()));
+            }
+            EventType::TimeRecorded { promise_id, time } => {
+                self.results
+                    .insert(promise_id.clone(), CachedResult::Time(*time));
+            }
+            EventType::TimerFired { promise_id } => {
+                self.results.insert(promise_id.clone(), CachedResult::Timer);
+            }
+            EventType::SignalReceived {
+                promise_id,
+                payload,
+                ..
+            } => {
+                self.results
+                    .insert(promise_id.clone(), CachedResult::Signal(payload.clone()));
+            }
+            _ => {}
+        }
     }
 
     /// Generic lookup by promise ID.
@@ -130,7 +143,8 @@ impl ReplayCache {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Duration;
+    use std::time::Duration;
+
     use invariant_types::Codec;
 
     use super::*;
@@ -210,7 +224,7 @@ mod tests {
                 6,
                 EventType::TimerScheduled {
                     promise_id: pid(6),
-                    duration: Duration::seconds(1),
+                    duration: Duration::from_secs(1),
                     fire_at: Utc::now(),
                 },
             ),

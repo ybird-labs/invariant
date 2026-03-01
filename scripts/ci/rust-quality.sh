@@ -3,4 +3,5 @@ set -euo pipefail
 
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets --no-fail-fast
+cargo nextest run --workspace --all-targets --no-fail-fast --profile ci
+cargo test --workspace --doc
