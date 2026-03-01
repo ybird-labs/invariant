@@ -8,13 +8,8 @@ use invariant_types::{
 
 /// Caller intent for journal mutation.
 ///
-/// Commands that allocate a new PromiseId omit it — the aggregate
-/// assigns it from `next_child_seq`. Commands that reference an
-/// existing promise carry the PromiseId explicitly.
-///
-/// Use [`classify()`](Self::classify) to decompose into
-/// [`AllocatingCommand`] or [`NonAllocatingCommand`] for type-safe
-/// conversion to events.
+/// Use [`classify()`](Self::classify) to decompose into allocating vs
+/// non-allocating form for type-safe event conversion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     // Lifecycle (4)
@@ -96,12 +91,8 @@ pub enum Command {
 }
 
 impl Command {
-    /// Decompose into [`CommandKind`], separating allocating commands
-    /// (which need an aggregate-assigned [`PromiseId`]) from
-    /// non-allocating commands (which carry their own or need none).
-    ///
-    /// This replaces the runtime `is_allocating()` check with a
-    /// compile-time type distinction.
+    /// Decompose into allocating or non-allocating form for type-safe
+    /// event conversion.
     pub(crate) fn classify(self) -> CommandKind {
         match self {
             // ── Allocating (6) ──
@@ -218,11 +209,7 @@ pub(crate) enum CommandKind {
     NonAllocating(NonAllocatingCommand),
 }
 
-/// Commands that require the aggregate to assign a new [`PromiseId`].
-///
-/// The 6 allocating commands omit their promise ID — the aggregate
-/// derives it from `execution_id + next_child_seq` before converting
-/// to an event via [`allocating_to_event`].
+/// Commands that require a new [`PromiseId`] assigned by the aggregate.
 pub(crate) enum AllocatingCommand {
     ScheduleInvoke {
         kind: InvokeKind,
@@ -248,10 +235,7 @@ pub(crate) enum AllocatingCommand {
     CreateJoinSet,
 }
 
-/// Commands that reference existing promises or need no promise ID at all.
-///
-/// The 13 non-allocating commands carry their own [`PromiseId`] (if any)
-/// and convert to events via [`non_allocating_to_event`].
+/// Commands that carry their own [`PromiseId`] or need none.
 pub(crate) enum NonAllocatingCommand {
     // Lifecycle (4)
     Complete {
@@ -308,16 +292,16 @@ pub(crate) enum NonAllocatingCommand {
     },
 }
 
+/// Output of [`ExecutionState::handle`]: the appended journal entry
+/// and any allocated promise ID.
 #[derive(Debug, Clone)]
 pub struct CommandResult {
     pub entry: JournalEntry,
     pub allocated_id: Option<PromiseId>,
 }
 
-/// Convert an [`AllocatingCommand`] and its aggregate-assigned [`PromiseId`]
+/// Convert an [`AllocatingCommand`] and its assigned [`PromiseId`]
 /// into the corresponding [`EventType`].
-///
-/// Infallible — the type signature guarantees the ID is present.
 pub(crate) fn allocating_to_event(cmd: AllocatingCommand, allocated_id: PromiseId) -> EventType {
     match cmd {
         AllocatingCommand::ScheduleInvoke {
@@ -362,8 +346,6 @@ pub(crate) fn allocating_to_event(cmd: AllocatingCommand, allocated_id: PromiseI
 }
 
 /// Convert a [`NonAllocatingCommand`] into the corresponding [`EventType`].
-///
-/// Infallible — no external ID needed; referencing commands carry their own.
 pub(crate) fn non_allocating_to_event(cmd: NonAllocatingCommand) -> EventType {
     match cmd {
         // ── Lifecycle ──

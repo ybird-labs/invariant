@@ -2,11 +2,10 @@ use invariant_types::{DomainError, JoinSetId, PromiseId, SignalDeliveryId};
 
 /// Describes a specific journal invariant violation.
 ///
-/// Most variants map 1:1 to formal invariants from the Quint spec,
-/// grouped as Structural (S-1..S-5), Side Effects (SE-1..SE-4),
+/// Variants are grouped as Structural (S-1..S-5), Side Effects (SE-1..SE-4),
 /// Control Flow (CF-1..CF-4), and JoinSet (JS-1..JS-7).
 ///
-/// `AllocatedChildMismatch` is an additional recovery-time integrity check
+/// `AllocatedChildMismatch` is a recovery-time integrity check
 /// that ensures recovered allocated child IDs match deterministic derivation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JournalViolation {

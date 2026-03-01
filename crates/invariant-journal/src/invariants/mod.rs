@@ -27,11 +27,9 @@ use invariant_types::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Accumulated auxiliary state for O(1) incremental invariant checking.
+/// Accumulated state for O(1) incremental invariant checking.
 ///
-/// Each field tracks just enough information from previously ingested entries
-/// to validate the next append without rescanning the journal. Fields are
-/// `pub(crate)` so sub-module checkers can read them; only [`apply_entry`]
+/// Fields are `pub(crate)` for sub-module checkers; only [`apply_entry`]
 /// mutates them.
 #[derive(Clone, Debug, Default)]
 pub struct InvariantState {
@@ -93,11 +91,10 @@ impl InvariantState {
         Self::default()
     }
 
-    /// Validate and ingest a single journal entry (incremental path).
+    /// Validate and ingest a single journal entry.
     ///
     /// Runs all 21 invariant checks against the current accumulated state,
-    /// then updates state on success. Short-circuits on the first violation
-    /// within each group, and bails across groups via `?`.
+    /// then updates state on success.
     pub fn check_append(&mut self, entry: &JournalEntry) -> Result<(), JournalViolation> {
         structural::check(self, entry)?;
         side_effects::check(self, entry)?;
@@ -132,11 +129,7 @@ impl InvariantState {
         }
     }
 
-    /// Update auxiliary state after an entry passes validation (or is force-applied
-    /// during batch validation).
-    ///
-    /// Centralized here rather than spread across sub-modules so that all state
-    /// mutations are visible in one place. Increments `len` as the final step.
+    /// Update auxiliary state after a validated entry.
     fn apply_entry(&mut self, entry: &JournalEntry) {
         match &entry.event {
             // S-3/S-4: record first terminal sequence number

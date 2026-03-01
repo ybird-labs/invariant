@@ -56,6 +56,7 @@ impl ReplayCache {
         replay_cache
     }
 
+    /// Index a single journal entry into the cache.
     pub fn insert_event(&mut self, entry: &JournalEntry) {
         match &entry.event {
             EventType::InvokeCompleted {

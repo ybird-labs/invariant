@@ -13,13 +13,10 @@ use crate::{
     status::{self, derive_next_status},
 };
 
-/// Per-execution aggregate root with command/apply separation.
+/// Per-execution aggregate root.
 ///
 /// Owns the append-only journal, derived status, invariant checking state,
-/// replay cache, and child-ID allocation counter. Mutation paths are expected
-/// to validate, allocate, and append atomically.
-///
-/// Maps to Quint's `ExecutionState = { journal, status, nextChildSeq, allocatedChildren }`.
+/// replay cache, and child-ID allocation counter.
 ///
 /// # Construction
 ///
@@ -139,25 +136,8 @@ impl ExecutionState {
     }
     /// Process a command: validate, then commit all state changes atomically.
     ///
-    /// # Design
-    ///
-    /// No state mutation occurs until every validation step succeeds:
-    ///
-    /// 1. **Classify** the command into [`AllocatingCommand`] or
-    ///    [`NonAllocatingCommand`] via [`Command::classify`].
-    /// 2. **Derive child ID** for allocating commands (read-only peek
-    ///    at counter + execution root).
-    /// 3. **Build event & entry** — allocating commands use
-    ///    [`allocating_to_event`] (takes `PromiseId` by value),
-    ///    non-allocating commands use [`non_allocating_to_event`].
-    ///    Both are infallible — the type system guarantees correctness.
-    /// 4. **Invariant check** via [`InvariantState::check_append`].
-    /// 5. **Commit** — counter advance, child set insert, status transition,
-    ///    replay cache update, journal append.
-    ///
-    /// If step 4 fails, the only state that could have changed is
-    /// `InvariantState` — but `check_append` does not call `apply_entry`
-    /// on failure, so no rollback is needed.
+    /// No state mutation occurs until every validation step succeeds.
+    /// On invariant failure, the aggregate is unchanged.
     ///
     /// # Errors
     ///
@@ -262,13 +242,11 @@ impl ExecutionState {
     }
 }
 
-/// Scan journal entries to reconstruct the child-allocation counter and set.
+/// Reconstruct the child-allocation counter and set from journal entries.
 ///
-/// Allocating events (6 kinds) each consumed one `next_child_seq` slot
-/// during the original execution. This function also verifies each recovered
-/// allocated ID matches deterministic derivation from the execution root and
-/// current sequence, then rebuilds allocation state so
-/// [`ExecutionState::recover`] can resume from the correct offset.
+/// Scans for the 6 allocating event kinds, verifies each recovered
+/// promise ID matches deterministic derivation from the execution root,
+/// and rebuilds the counter and set.
 fn build_child_state(
     execution_id: &ExecutionId,
     entries: &[JournalEntry],
@@ -314,21 +292,17 @@ fn build_child_state(
     Ok((next_child_seq, allocated_children))
 }
 
-/// Zero-sized proof that [`ChildSeqCounter::check_advance`] succeeded.
+/// Proof token from [`ChildSeqCounter::check_advance`].
 ///
 /// Consumed by [`ChildSeqCounter::advance`] to make the increment infallible.
-/// Private constructor prevents forgery outside this module.
 struct AdvancePermit {
     _private: (),
 }
 
 /// Monotonically increasing counter for child sequence allocation.
 ///
-/// Uses the permit pattern to enforce at compile time that overflow is
-/// checked before mutation: [`check_advance`](Self::check_advance) returns
-/// an [`AdvancePermit`] that [`advance`](Self::advance) consumes.
-/// This guarantees the commit phase of [`ExecutionState::handle`] is
-/// entirely infallible.
+/// Overflow is checked before mutation: [`check_advance`](Self::check_advance)
+/// returns an [`AdvancePermit`] that [`advance`](Self::advance) consumes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ChildSeqCounter(u32);
 
@@ -342,12 +316,9 @@ impl ChildSeqCounter {
         self.0
     }
 
-    /// Validate that the counter can be advanced without overflow.
+    /// Check that the counter can advance without overflow.
     ///
-    /// Returns an [`AdvancePermit`] that must be passed to [`advance`](Self::advance)
-    /// to complete the operation. This separates the fallible check from the
-    /// infallible mutation, allowing callers to interleave other fallible work
-    /// (e.g., invariant checking) between the two.
+    /// Returns an [`AdvancePermit`] required by [`advance`](Self::advance).
     fn check_advance(&self) -> Result<AdvancePermit, DomainError> {
         self.0
             .checked_add(1)
@@ -355,8 +326,7 @@ impl ChildSeqCounter {
             .ok_or(DomainError::MaxChildrenExceeded { max: u32::MAX })
     }
 
-    /// Advance the counter. Infallible — the [`AdvancePermit`] proves overflow
-    /// was already checked.
+    /// Increment the counter. Requires an [`AdvancePermit`] from [`check_advance`].
     fn advance(&mut self, _permit: AdvancePermit) {
         self.0 += 1;
     }

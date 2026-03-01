@@ -4,13 +4,10 @@ use invariant_types::{AwaitKind, EventType, ExecutionStatus, JournalEntry, Promi
 
 /// Derive the current execution status by replaying journal events left-to-right.
 ///
-/// This is the canonical recovery path: load persisted entries and fold them into
+/// This is the recovery path: load persisted entries and fold them into
 /// the latest `ExecutionStatus`.
 ///
 /// Complexity: O(n) over `entries.len()`.
-///
-/// Precondition: journal invariants are enforced upstream (S-2 guarantees the
-/// first event is `ExecutionStarted`), so an empty journal is treated as misuse.
 pub fn derive_status(entries: &[JournalEntry]) -> ExecutionStatus {
     debug_assert!(
         !entries.is_empty(),
@@ -32,11 +29,7 @@ pub fn derive_status(entries: &[JournalEntry]) -> ExecutionStatus {
 
 /// Apply a single-event status transition.
 ///
-/// Use this in append-time paths where status is already known and a new event
-/// arrives; this gives O(1) incremental updates instead of re-folding the journal.
-///
-/// Semantics match one step of `derive_status`: events that do not affect status
-/// return the previous `current_status` unchanged.
+/// Events that do not affect status return `current_status` unchanged.
 pub(crate) fn derive_next_status(
     current_status: ExecutionStatus,
     event_type: &EventType,

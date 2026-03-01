@@ -17,13 +17,10 @@ pub struct PromiseId {
     path: Vec<u32>,
 }
 
-/// A root-level [`PromiseId`] guaranteed to have been derived from
+/// A root-level [`PromiseId`] derived from
 /// `SHA-256(component_digest, idempotency_key, parent_id)`.
 ///
-/// The only public constructor is [`ExecutionId::derive`], which enforces
-/// correctness by construction. Child promises are obtained via
-/// [`ExecutionId::child`], which returns a [`PromiseId`] (not an
-/// `ExecutionId`), correctly modelling the type-level relationship.
+/// Construct via [`derive`](Self::derive); create children via [`child`](Self::child).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExecutionId(PromiseId);
 

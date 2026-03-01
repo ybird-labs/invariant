@@ -21,10 +21,6 @@ mod serde_duration {
 }
 
 /// Categorizes the type of side-effect invocation.
-///
-/// Extensible: new side effect types (DB queries, gRPC calls) are added as
-/// variants here, not as new event types. All share the same 3-phase
-/// Scheduled → Started → Completed structure.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvokeKind {
     /// Function/task/workflow invocation.
