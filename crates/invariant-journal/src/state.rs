@@ -6,7 +6,7 @@ use invariant_types::{
 };
 
 use crate::{
-    command::{allocating_to_event, non_allocating_to_event, Command, CommandKind, CommandResult},
+    command::{Command, CommandKind, CommandResult, allocating_to_event, non_allocating_to_event},
     error::{JournalError, JournalViolation},
     invariants::InvariantState,
     replay::ReplayCache,
