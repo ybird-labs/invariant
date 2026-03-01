@@ -36,6 +36,10 @@ result-*
 .DS_Store
 Thumbs.db
 
+# TLA+ model checker output
+states/
+_apalache-out/
+
 
 # Added by cargo
 
