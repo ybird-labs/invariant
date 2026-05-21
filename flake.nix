@@ -35,6 +35,22 @@
           inherit src;
           cargoLock.lockFile = ./Cargo.lock;
         };
+        cargoCrap = rustPlatform.buildRustPackage rec {
+          pname = "cargo-crap";
+          version = "0.2.0";
+
+          src = pkgs.fetchCrate {
+            inherit pname version;
+            hash = "sha256-WH8bexRxJTs4ifpC8NxORjA939H+2/uMzOcR7TR8ggk=";
+          };
+
+          cargoHash = "sha256-8WZqSSBxbTOyL/TEOCmP+JYERLgxnsVcO/CfaYi2uQ8=";
+
+          # Upstream CLI tests assume runtime commands that are not available in
+          # the Nix sandbox. The packaged binary is validated by this repo's
+          # change-risk check.
+          doCheck = false;
+        };
       in
       {
         formatter = pkgs.nixfmt-rfc-style;
@@ -59,6 +75,7 @@
             cargo-nextest
             cargo-llvm-cov
             cargo-insta
+            cargoCrap
             just
           ];
 
