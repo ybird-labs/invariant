@@ -56,3 +56,28 @@ jobs:
 
       - name: Run fmt, clippy, and tests
         run: nix develop --accept-flake-config -c ./scripts/ci/rust-quality.sh
+
+  change-risk:
+    name: change-risk (cargo-crap)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+
+      - name: Enable Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - name: Install cargo-crap
+        run: nix develop --accept-flake-config -c cargo install cargo-crap --locked
+
+      - name: Generate LCOV coverage
+        run: nix develop --accept-flake-config -c cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
+
+      - name: Check change risk
+        run: nix develop --accept-flake-config -c cargo crap --lcov lcov.info --format github --fail-above --threshold 30
