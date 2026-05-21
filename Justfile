@@ -38,11 +38,11 @@ install-cargo-crap:
 
 # Run cargo-crap against an existing LCOV report.
 crap lcov="lcov.info" threshold="30":
-    nix develop --accept-flake-config -c cargo crap --lcov {{lcov}} --format github --fail-above --threshold {{threshold}}
+    nix develop --accept-flake-config -c cargo crap --workspace --lcov {{lcov}} --format github --fail-above --threshold {{threshold}}
 
 # Generate coverage and run the cargo-crap change-risk gate.
 change-risk threshold="30": install-cargo-crap coverage
-    nix develop --accept-flake-config -c cargo crap --lcov lcov.info --format github --fail-above --threshold {{threshold}}
+    nix develop --accept-flake-config -c cargo crap --workspace --lcov lcov.info --format github --fail-above --threshold {{threshold}}
 
 # Run the same local gates as CI, excluding the cross-platform flake matrix.
 ci: rust-quality change-risk

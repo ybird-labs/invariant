@@ -306,3 +306,195 @@ impl std::fmt::Display for JournalViolation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pid(tag: u8) -> PromiseId {
+        PromiseId::new([tag; 32])
+    }
+
+    fn js(tag: u8) -> JoinSetId {
+        JoinSetId(pid(tag))
+    }
+
+    #[test]
+    fn journal_violation_display_should_render_stable_messages_for_all_variants() {
+        let p1 = pid(1);
+        let p2 = pid(2);
+        let js1 = js(3);
+        let js2 = js(4);
+        let cases = vec![
+            (
+                JournalViolation::NonMonotonicSequence {
+                    entry_index: 1,
+                    expected: 2,
+                    actual: 3,
+                },
+                "S-1: non-monotonic sequence at index 1: expected 2, got 3".to_string(),
+            ),
+            (
+                JournalViolation::MissingExecutionStarted {
+                    first_event: "TimerFired".into(),
+                },
+                "S-2: first event must be ExecutionStarted, got TimerFired".to_string(),
+            ),
+            (
+                JournalViolation::MultipleTerminalEvents {
+                    first_at: 5,
+                    second_at: 8,
+                },
+                "S-3: multiple terminal events at seq 5 and 8".to_string(),
+            ),
+            (
+                JournalViolation::TerminalNotLast {
+                    terminal_seq: 9,
+                    journal_len: 11,
+                },
+                "S-4: terminal event at seq 9 is not last (journal len 11)".to_string(),
+            ),
+            (
+                JournalViolation::CancelledWithoutRequest { cancelled_seq: 12 },
+                "S-5: ExecutionCancelled at seq 12 without prior CancelRequested".to_string(),
+            ),
+            (
+                JournalViolation::AllocatedChildMismatch {
+                    event_seq: 13,
+                    event_name: "InvokeScheduled".into(),
+                    expected: p1.clone(),
+                    actual: p2.clone(),
+                },
+                format!(
+                    "S-6: child allocation mismatch at seq 13 (InvokeScheduled): expected {p1}, got {p2}"
+                ),
+            ),
+            (
+                JournalViolation::StartedWithoutScheduled {
+                    promise_id: p1.clone(),
+                    started_seq: 14,
+                },
+                format!("SE-1: InvokeStarted at seq 14 for {p1} without prior InvokeScheduled"),
+            ),
+            (
+                JournalViolation::CompletedWithoutStarted {
+                    promise_id: p1.clone(),
+                    completed_seq: 15,
+                },
+                format!("SE-2: InvokeCompleted at seq 15 for {p1} without prior InvokeStarted"),
+            ),
+            (
+                JournalViolation::RetryingWithoutStarted {
+                    promise_id: p1.clone(),
+                    failed_attempt: 2,
+                    retrying_seq: 16,
+                },
+                format!(
+                    "SE-3: InvokeRetrying at seq 16 for {p1} failed_attempt 2 without prior matching InvokeStarted"
+                ),
+            ),
+            (
+                JournalViolation::EventAfterCompleted {
+                    promise_id: p1.clone(),
+                    offending_seq: 17,
+                    offending_event: "InvokeStarted".into(),
+                },
+                format!("SE-4: InvokeStarted at seq 17 for {p1} after InvokeCompleted"),
+            ),
+            (
+                JournalViolation::TimerFiredWithoutScheduled {
+                    promise_id: p1.clone(),
+                    fired_seq: 18,
+                },
+                format!("CF-1: TimerFired at seq 18 for {p1} without prior TimerScheduled"),
+            ),
+            (
+                JournalViolation::SignalReceivedWithoutDelivery {
+                    signal_name: "ready".into(),
+                    delivery_id: 19,
+                    received_seq: 20,
+                },
+                "CF-2: SignalReceived at seq 20 for signal 'ready' delivery 19 without prior SignalDelivered".to_string(),
+            ),
+            (
+                JournalViolation::SignalConsumedTwice {
+                    signal_name: "ready".into(),
+                    delivery_id: 21,
+                    second_seq: 22,
+                },
+                "CF-3: signal 'ready' delivery 21 consumed twice, second at seq 22".to_string(),
+            ),
+            (
+                JournalViolation::AwaitSignalInconsistent {
+                    awaiting_seq: 23,
+                    waiting_on_count: 2,
+                },
+                "CF-4: ExecutionAwaiting(Signal) at seq 23 is inconsistent (waiting_on_count=2); expected exactly one waiting promise matching AwaitKind::Signal.promise_id".to_string(),
+            ),
+            (
+                JournalViolation::AwaitWaitingOnDuplicate {
+                    awaiting_seq: 24,
+                    promise_id: p1.clone(),
+                },
+                format!("ExecutionAwaiting at seq 24 contains duplicate waiting_on promise {p1}"),
+            ),
+            (
+                JournalViolation::SubmitWithoutCreate {
+                    join_set_id: js1.clone(),
+                    submitted_seq: 25,
+                },
+                format!("JS-1: JoinSetSubmitted at seq 25 for {js1} without prior JoinSetCreated"),
+            ),
+            (
+                JournalViolation::SubmitAfterAwait {
+                    join_set_id: js1.clone(),
+                    submitted_seq: 26,
+                },
+                format!("JS-2: JoinSetSubmitted at seq 26 for {js1} after JoinSetAwaited"),
+            ),
+            (
+                JournalViolation::AwaitedNotMember {
+                    join_set_id: js1.clone(),
+                    promise_id: p1.clone(),
+                    awaited_seq: 27,
+                },
+                format!("JS-3: JoinSetAwaited at seq 27 for {p1} not a member of {js1}"),
+            ),
+            (
+                JournalViolation::AwaitedNotCompleted {
+                    promise_id: p1.clone(),
+                    awaited_seq: 28,
+                },
+                format!("JS-4: JoinSetAwaited at seq 28 for {p1} which is not yet completed"),
+            ),
+            (
+                JournalViolation::DoubleConsume {
+                    join_set_id: js1.clone(),
+                    promise_id: p1.clone(),
+                    second_seq: 29,
+                },
+                format!("JS-5: {p1} consumed twice from {js1}, second at seq 29"),
+            ),
+            (
+                JournalViolation::ConsumeExceedsSubmit {
+                    join_set_id: js1.clone(),
+                    submitted: 1,
+                    awaited: 2,
+                },
+                format!("JS-6: {js1} has 2 awaits exceeding 1 submits"),
+            ),
+            (
+                JournalViolation::PromiseInMultipleJoinSets {
+                    promise_id: p1.clone(),
+                    first_js: js1.clone(),
+                    second_js: js2.clone(),
+                },
+                format!("JS-7: {p1} submitted to both {js1} and {js2}"),
+            ),
+        ];
+
+        for (violation, expected) in cases {
+            assert_eq!(violation.to_string(), expected);
+        }
+    }
+}

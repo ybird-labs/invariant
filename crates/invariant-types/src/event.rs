@@ -205,3 +205,171 @@ impl EventType {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::execution_error::{ErrorKind, ExecutionError};
+    use crate::join_set::JoinSetId;
+    use crate::payload::{Codec, Payload};
+    use chrono::Utc;
+
+    fn pid(tag: u8) -> PromiseId {
+        PromiseId::new([tag; 32])
+    }
+
+    fn payload() -> Payload {
+        Payload::new(Vec::new(), Codec::Json)
+    }
+
+    #[test]
+    fn name_should_return_stable_variant_names_for_all_event_types() {
+        let p1 = pid(1);
+        let p2 = pid(2);
+        let cases = vec![
+            (
+                EventType::ExecutionStarted {
+                    component_digest: vec![1, 2, 3],
+                    input: payload(),
+                    parent_id: None,
+                    idempotency_key: "root".into(),
+                },
+                "ExecutionStarted",
+            ),
+            (
+                EventType::ExecutionCompleted { result: payload() },
+                "ExecutionCompleted",
+            ),
+            (
+                EventType::ExecutionFailed {
+                    error: ExecutionError::new(ErrorKind::UserError, "failed"),
+                },
+                "ExecutionFailed",
+            ),
+            (
+                EventType::CancelRequested {
+                    reason: "stop".into(),
+                },
+                "CancelRequested",
+            ),
+            (
+                EventType::ExecutionCancelled {
+                    reason: "stopped".into(),
+                },
+                "ExecutionCancelled",
+            ),
+            (
+                EventType::InvokeScheduled {
+                    promise_id: p1.clone(),
+                    kind: InvokeKind::Function,
+                    function_name: "work".into(),
+                    input: payload(),
+                    retry_policy: Some(RetryPolicy {}),
+                },
+                "InvokeScheduled",
+            ),
+            (
+                EventType::InvokeStarted {
+                    promise_id: p1.clone(),
+                    attempt: 1,
+                },
+                "InvokeStarted",
+            ),
+            (
+                EventType::InvokeCompleted {
+                    promise_id: p1.clone(),
+                    result: payload(),
+                    attempt: 1,
+                },
+                "InvokeCompleted",
+            ),
+            (
+                EventType::InvokeRetrying {
+                    promise_id: p1.clone(),
+                    failed_attempt: 1,
+                    error: ExecutionError::new(ErrorKind::Timeout, "timeout"),
+                    retry_at: Utc::now(),
+                },
+                "InvokeRetrying",
+            ),
+            (
+                EventType::RandomGenerated {
+                    promise_id: p1.clone(),
+                    value: vec![4, 5, 6],
+                },
+                "RandomGenerated",
+            ),
+            (
+                EventType::TimeRecorded {
+                    promise_id: p1.clone(),
+                    time: Utc::now(),
+                },
+                "TimeRecorded",
+            ),
+            (
+                EventType::TimerScheduled {
+                    promise_id: p1.clone(),
+                    duration: Duration::from_secs(5),
+                    fire_at: Utc::now(),
+                },
+                "TimerScheduled",
+            ),
+            (
+                EventType::TimerFired {
+                    promise_id: p1.clone(),
+                },
+                "TimerFired",
+            ),
+            (
+                EventType::SignalDelivered {
+                    signal_name: "ready".into(),
+                    payload: payload(),
+                    delivery_id: 7,
+                },
+                "SignalDelivered",
+            ),
+            (
+                EventType::SignalReceived {
+                    promise_id: p1.clone(),
+                    signal_name: "ready".into(),
+                    payload: payload(),
+                    delivery_id: 7,
+                },
+                "SignalReceived",
+            ),
+            (
+                EventType::ExecutionAwaiting {
+                    waiting_on: vec![p1.clone()],
+                    kind: AwaitKind::Single,
+                },
+                "ExecutionAwaiting",
+            ),
+            (EventType::ExecutionResumed, "ExecutionResumed"),
+            (
+                EventType::JoinSetCreated {
+                    join_set_id: JoinSetId(p2.clone()),
+                },
+                "JoinSetCreated",
+            ),
+            (
+                EventType::JoinSetSubmitted {
+                    join_set_id: JoinSetId(p2.clone()),
+                    promise_id: p1.clone(),
+                },
+                "JoinSetSubmitted",
+            ),
+            (
+                EventType::JoinSetAwaited {
+                    join_set_id: JoinSetId(p2),
+                    promise_id: p1,
+                    result: payload(),
+                },
+                "JoinSetAwaited",
+            ),
+        ];
+
+        for (event, expected) in cases {
+            assert_eq!(event.name(), expected);
+        }
+    }
+}
