@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -19,9 +20,9 @@ jobs:
     name: Detect relevant changes
     runs-on: ubuntu-latest
     outputs:
-      flake-check: ${{ steps.filter.outputs.flake-check }}
-      rust-quality: ${{ steps.filter.outputs.rust-quality }}
-      change-risk: ${{ steps.filter.outputs.change-risk }}
+      flake-check: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.flake-check == 'true' }}
+      rust-quality: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust-quality == 'true' }}
+      change-risk: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.change-risk == 'true' }}
 
     steps:
       - name: Checkout
@@ -31,75 +32,47 @@ jobs:
           fetch-depth: 0
 
       - name: Detect files that affect CI gates
+        if: github.event_name != 'workflow_dispatch'
         id: filter
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -eu
-
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "flake-check=true" >> "$GITHUB_OUTPUT"
-            echo "rust-quality=true" >> "$GITHUB_OUTPUT"
-            echo "change-risk=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            base="$BASE_SHA"
-          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
-            base="$BEFORE_SHA"
-          else
-            base="$(git rev-parse HEAD^)"
-          fi
-
-          echo "Comparing $base...$HEAD_SHA"
-          changed_files="$(git diff --name-only "$base" "$HEAD_SHA")"
-          printf '%s\n' "$changed_files"
-
-          flake_check=false
-          rust_quality=false
-          change_risk=false
-
-          while IFS= read -r file; do
-            case "$file" in
-              Cargo.toml|Cargo.lock|\
-              Justfile|\
-              flake.nix|flake.lock|\
-              crates/*|crates/**/*)
-                flake_check=true
-                rust_quality=true
-                change_risk=true
-                ;;
-            esac
-
-            case "$file" in
-              .cargo/*|.cargo/**/*|\
-              .config/*|.config/**/*|\
-              rustfmt.toml|.rustfmt.toml|\
-              clippy.toml|.clippy.toml|\
-              scripts/ci/rust-quality.sh|\
-              src/*|src/**/*)
-                rust_quality=true
-                ;;
-            esac
-
-            case "$file" in
-              .cargo/*|.cargo/**/*|\
-              scripts/ci/*|scripts/ci/**/*|\
-              src/*|src/**/*)
-                change_risk=true
-                ;;
-            esac
-          done <<EOF
-          $changed_files
-          EOF
-
-          echo "flake-check=$flake_check" >> "$GITHUB_OUTPUT"
-          echo "rust-quality=$rust_quality" >> "$GITHUB_OUTPUT"
-          echo "change-risk=$change_risk" >> "$GITHUB_OUTPUT"
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590
+        with:
+          filters: |
+            flake-check:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'crates/**'
+            rust-quality:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - '.config/**'
+              - 'rustfmt.toml'
+              - '.rustfmt.toml'
+              - 'clippy.toml'
+              - '.clippy.toml'
+              - 'scripts/ci/rust-quality.sh'
+              - 'crates/**'
+              - 'src/**'
+            change-risk:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - '.cargo/**'
+              - 'scripts/ci/**'
+              - 'crates/**'
+              - 'src/**'
 
   flake-check:
     name: flake-check (${{ matrix.os }})
