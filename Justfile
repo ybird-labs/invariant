@@ -60,13 +60,6 @@ _coverage:
 coverage:
     nix develop --accept-flake-config -c just _coverage
 
-# Install cargo-crap into the local Cargo bin directory if it is missing.
-_install-cargo-crap:
-    bash -lc 'command -v cargo-crap >/dev/null || cargo install cargo-crap --version 0.2.0 --locked'
-
-install-cargo-crap:
-    nix develop --accept-flake-config -c just _install-cargo-crap
-
 # Run cargo-crap against an existing LCOV report.
 _crap lcov="lcov.info" threshold="30":
     cargo crap --workspace --lcov {{lcov}} --format github --fail-above --threshold {{threshold}}
@@ -75,7 +68,7 @@ crap lcov="lcov.info" threshold="30":
     nix develop --accept-flake-config -c just _crap {{lcov}} {{threshold}}
 
 # Generate coverage and run the cargo-crap change-risk gate.
-_change-risk threshold="30": _install-cargo-crap _coverage
+_change-risk threshold="30": _coverage
     cargo crap --workspace --lcov lcov.info --format github --fail-above --threshold {{threshold}}
 
 change-risk threshold="30":
