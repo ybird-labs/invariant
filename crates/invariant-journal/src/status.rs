@@ -270,4 +270,120 @@ mod tests {
         assert!(!resolvers.contains(&p_random));
         assert!(!resolvers.contains(&p_time));
     }
+
+    #[test]
+    fn can_resume_should_return_false_for_non_blocked_statuses() {
+        let resolved = HashSet::from([pid(1)]);
+
+        for status in [
+            ExecutionStatus::Running,
+            ExecutionStatus::Cancelling,
+            ExecutionStatus::Completed,
+            ExecutionStatus::Failed,
+            ExecutionStatus::Cancelled,
+        ] {
+            assert!(!can_resume(&status, &resolved));
+        }
+    }
+
+    #[test]
+    fn can_resume_should_require_single_wait_promise_to_be_resolved() {
+        let p1 = pid(1);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![p1.clone()],
+            kind: AwaitKind::Single,
+        };
+
+        assert!(!can_resume(&status, &HashSet::new()));
+        assert!(can_resume(&status, &HashSet::from([p1])));
+    }
+
+    #[test]
+    fn can_resume_should_require_all_wait_promises_to_be_resolved() {
+        let p1 = pid(1);
+        let p2 = pid(2);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![p1.clone(), p2.clone()],
+            kind: AwaitKind::All,
+        };
+
+        assert!(!can_resume(&status, &HashSet::from([p1.clone()])));
+        assert!(can_resume(&status, &HashSet::from([p1, p2])));
+    }
+
+    #[test]
+    fn can_resume_should_resume_any_wait_when_one_promise_is_resolved() {
+        let p1 = pid(1);
+        let p2 = pid(2);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![p1, p2.clone()],
+            kind: AwaitKind::Any,
+        };
+
+        assert!(can_resume(&status, &HashSet::from([p2])));
+    }
+
+    #[test]
+    fn can_resume_should_keep_any_wait_blocked_when_no_promise_is_resolved() {
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![pid(1), pid(2)],
+            kind: AwaitKind::Any,
+        };
+
+        assert!(!can_resume(&status, &HashSet::new()));
+    }
+
+    #[test]
+    fn can_resume_should_require_matching_resolved_signal_promise() {
+        let p1 = pid(1);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![p1.clone()],
+            kind: AwaitKind::Signal {
+                name: "ready".into(),
+                promise_id: p1.clone(),
+            },
+        };
+
+        assert!(!can_resume(&status, &HashSet::new()));
+        assert!(can_resume(&status, &HashSet::from([p1])));
+    }
+
+    #[test]
+    fn can_resume_should_reject_signal_wait_with_mismatched_waiting_promise() {
+        let p1 = pid(1);
+        let p2 = pid(2);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![p1.clone()],
+            kind: AwaitKind::Signal {
+                name: "ready".into(),
+                promise_id: p2,
+            },
+        };
+        let resolved = HashSet::from([p1]);
+
+        if cfg!(debug_assertions) {
+            assert!(std::panic::catch_unwind(|| can_resume(&status, &resolved)).is_err());
+        } else {
+            assert!(!can_resume(&status, &resolved));
+        }
+    }
+
+    #[test]
+    fn can_resume_should_reject_signal_wait_with_empty_waiting_on() {
+        let p1 = pid(1);
+        let status = ExecutionStatus::Blocked {
+            waiting_on: Vec::new(),
+            kind: AwaitKind::Signal {
+                name: "ready".into(),
+                promise_id: p1.clone(),
+            },
+        };
+        let resolved = HashSet::from([p1]);
+
+        if cfg!(debug_assertions) {
+            assert!(std::panic::catch_unwind(|| can_resume(&status, &resolved)).is_err());
+        } else {
+            assert!(!can_resume(&status, &resolved));
+        }
+    }
 }

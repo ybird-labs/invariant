@@ -63,3 +63,52 @@ pub struct ExecutionJournal {
     pub execution_id: ExecutionId,
     pub entries: Vec<JournalEntry>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::payload::{Codec, Payload};
+
+    fn pid(tag: u8) -> PromiseId {
+        PromiseId::new([tag; 32])
+    }
+
+    #[test]
+    fn execution_status_display_should_render_stable_names_for_all_variants() {
+        let cases = [
+            (ExecutionStatus::Running, "Running"),
+            (
+                ExecutionStatus::Blocked {
+                    waiting_on: vec![pid(1)],
+                    kind: AwaitKind::Single,
+                },
+                "Blocked",
+            ),
+            (ExecutionStatus::Cancelling, "Cancelling"),
+            (ExecutionStatus::Completed, "Completed"),
+            (ExecutionStatus::Failed, "Failed"),
+            (ExecutionStatus::Cancelled, "Cancelled"),
+        ];
+
+        for (status, expected) in cases {
+            assert_eq!(status.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn blocked_status_display_should_ignore_wait_payload_details() {
+        let status = ExecutionStatus::Blocked {
+            waiting_on: vec![pid(2)],
+            kind: AwaitKind::Signal {
+                name: "ready".into(),
+                promise_id: pid(2),
+            },
+        };
+
+        assert_eq!(status.to_string(), "Blocked");
+
+        // Keep Payload imported in this test module's compilation unit alongside
+        // journal types that commonly carry payloads.
+        let _ = Payload::new(Vec::new(), Codec::Json);
+    }
+}

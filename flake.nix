@@ -59,6 +59,7 @@
             cargo-nextest
             cargo-llvm-cov
             cargo-insta
+            just
           ];
 
           RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
