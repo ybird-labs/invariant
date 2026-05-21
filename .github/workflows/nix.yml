@@ -9,14 +9,75 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      flake-check: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.flake-check == 'true' }}
+      rust-quality: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.rust-quality == 'true' }}
+      change-risk: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.change-risk == 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Detect files that affect CI gates
+        if: github.event_name != 'workflow_dispatch'
+        id: filter
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590
+        with:
+          filters: |
+            flake-check:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'crates/**'
+            rust-quality:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - '.config/**'
+              - 'rustfmt.toml'
+              - '.rustfmt.toml'
+              - 'clippy.toml'
+              - '.clippy.toml'
+              - 'scripts/ci/rust-quality.sh'
+              - 'crates/**'
+              - 'src/**'
+            change-risk:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Justfile'
+              - 'justfile'
+              - 'flake.nix'
+              - 'flake.lock'
+              - '.cargo/**'
+              - 'scripts/ci/**'
+              - 'crates/**'
+              - 'src/**'
+
   flake-check:
     name: flake-check (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.flake-check == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -40,6 +101,8 @@ jobs:
 
   rust-quality:
     name: rust-quality (ubuntu)
+    needs: changes
+    if: needs.changes.outputs.rust-quality == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -59,6 +122,8 @@ jobs:
 
   change-risk:
     name: change-risk (cargo-crap)
+    needs: changes
+    if: needs.changes.outputs.change-risk == 'true'
     runs-on: ubuntu-latest
 
     steps:
