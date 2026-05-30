@@ -696,6 +696,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "invariant-coordinator"
+version = "0.1.0"
+
+[[package]]
 name = "invariant-engine"
 version = "0.1.0"
 dependencies = [
@@ -719,6 +723,10 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "invariant-scheduler"
+version = "0.1.0"
 
 [[package]]
 name = "invariant-types"

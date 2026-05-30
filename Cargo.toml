@@ -1,8 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/invariant-coordinator",
     "crates/invariant-engine",
     "crates/invariant-journal",
+    "crates/invariant-scheduler",
     "crates/invariant-types",
 ]
 
