@@ -44,7 +44,14 @@
             hash = "sha256-WH8bexRxJTs4ifpC8NxORjA939H+2/uMzOcR7TR8ggk=";
           };
 
-          cargoHash = "sha256-8WZqSSBxbTOyL/TEOCmP+JYERLgxnsVcO/CfaYi2uQ8=";
+          # Vendor deps from the lock file shipped inside the published crate.
+          # This routes downloads through Nix's native `fetchurl` (the same path
+          # the `invariant` package above uses), instead of buildRustPackage's
+          # `cargoHash` / fetchCargoVendor path. The latter downloads with a
+          # Python `requests` client whose `python-requests/*` User-Agent is
+          # now rejected by crates.io's WAF with HTTP 403, which was failing
+          # the change-risk gate in CI even when project code was fine.
+          cargoLock.lockFile = "${src}/Cargo.lock";
 
           # Upstream CLI tests assume runtime commands that are not available in
           # the Nix sandbox. The packaged binary is validated by this repo's
