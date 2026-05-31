@@ -18,11 +18,12 @@ impl Priority {
     /// Neutral baseline, mid-range so callers have headroom in both directions.
     pub const DEFAULT: Self = Self(128);
 
-    pub fn new(value: u8) -> Self {
+    pub const fn new(value: u8) -> Self {
         Self(value)
     }
 
-    pub fn value(self) -> u8 {
+    #[must_use]
+    pub const fn value(self) -> u8 {
         self.0
     }
 }
@@ -41,11 +42,12 @@ impl Default for Priority {
 pub struct Deadline(SchedulerTime);
 
 impl Deadline {
-    pub fn new(time: SchedulerTime) -> Self {
+    pub const fn new(time: SchedulerTime) -> Self {
         Self(time)
     }
 
-    pub fn time(self) -> SchedulerTime {
+    #[must_use]
+    pub const fn time(self) -> SchedulerTime {
         self.0
     }
 }
@@ -57,11 +59,48 @@ impl Deadline {
 pub struct ReadyAt(SchedulerTime);
 
 impl ReadyAt {
-    pub fn new(time: SchedulerTime) -> Self {
+    pub const fn new(time: SchedulerTime) -> Self {
         Self(time)
     }
 
-    pub fn time(self) -> SchedulerTime {
+    #[must_use]
+    pub const fn time(self) -> SchedulerTime {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::SchedulerTime;
+
+    #[test]
+    fn priority_default_is_mid_range_baseline() {
+        assert_eq!(Priority::default(), Priority::DEFAULT);
+        assert_eq!(Priority::DEFAULT.value(), 128);
+    }
+
+    #[test]
+    fn priority_min_max_pin_the_u8_range() {
+        assert_eq!(Priority::MIN.value(), 0);
+        assert_eq!(Priority::MAX.value(), 255);
+    }
+
+    #[test]
+    fn priority_orders_higher_value_as_greater() {
+        assert!(Priority::MAX > Priority::DEFAULT);
+        assert!(Priority::DEFAULT > Priority::MIN);
+    }
+
+    #[test]
+    fn deadline_round_trips_its_time() {
+        let t = SchedulerTime::from_millis_since_epoch(42);
+        assert_eq!(Deadline::new(t).time(), t);
+    }
+
+    #[test]
+    fn ready_at_round_trips_its_time() {
+        let t = SchedulerTime::from_millis_since_epoch(42);
+        assert_eq!(ReadyAt::new(t).time(), t);
     }
 }
