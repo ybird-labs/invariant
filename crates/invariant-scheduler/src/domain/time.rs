@@ -11,22 +11,32 @@ use crate::domain::error::DomainError;
 pub struct SchedulerTime(Duration);
 
 impl SchedulerTime {
+    /// Creates a time from a [`Duration`] elapsed since the scheduler epoch.
     pub fn from_duration_since_epoch(value: Duration) -> Self {
         Self(value)
     }
 
+    /// Creates a time from milliseconds elapsed since the scheduler epoch.
     pub fn from_millis_since_epoch(value: u64) -> Self {
         Self(Duration::from_millis(value))
     }
 
+    /// Creates a time from seconds elapsed since the scheduler epoch.
     pub fn from_secs_since_epoch(value: u64) -> Self {
         Self(Duration::from_secs(value))
     }
 
+    /// Returns the [`Duration`] elapsed since the scheduler epoch.
     pub fn duration_since_epoch(self) -> Duration {
         self.0
     }
 
+    /// Returns this time advanced by `duration`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::TimeOverflow`] if the result would exceed the
+    /// representable range.
     pub fn checked_add_duration(self, duration: Duration) -> Result<Self, DomainError> {
         self.0
             .checked_add(duration)
