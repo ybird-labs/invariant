@@ -79,3 +79,17 @@ _ci: _rust-quality _change-risk
 
 ci:
     nix develop --accept-flake-config -c just _ci
+
+# Run Kani proof harnesses (bounded model checking). Slow; a separate gate, not part of _ci.
+_verify:
+    cargo kani --tests
+
+verify:
+    nix develop --accept-flake-config -c just _verify
+
+# One-time Kani toolchain setup (downloads the Kani bundle into ~/.kani).
+_kani-setup:
+    cargo kani setup
+
+kani-setup:
+    nix develop --accept-flake-config -c just _kani-setup
