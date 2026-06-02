@@ -114,6 +114,13 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@90bb610b90bf290cad97484ba341453bd1cbefea
 
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          shared-key: quality
+          cmd-format: nix develop --accept-flake-config -c {0}
+          cache-bin: false
+
       - name: Run fmt, clippy, and tests
         run: nix develop --accept-flake-config -c just _rust-quality
 
