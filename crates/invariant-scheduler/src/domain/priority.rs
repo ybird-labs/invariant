@@ -55,7 +55,7 @@ impl Deadline {
 /// Earliest time a job may start.
 ///
 /// A readiness gate (eligibility) consumed by the ReadyClock, never an ordering/sort key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReadyAt(SchedulerTime);
 
 impl ReadyAt {
