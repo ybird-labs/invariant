@@ -62,17 +62,21 @@ impl TargetRef {
     }
 }
 
-/// The zero-based count of how many times a job has been attempted.
+/// The zero-based index of a job's current attempt; the first attempt is zero.
+///
+/// A job starts at [`zero`](Self::zero) and the index is incremented by
+/// [`Job::retry`]. It is an ordinal, not a count: a job on its first attempt
+/// has value `0`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttemptNumber(u32);
 
 impl AttemptNumber {
-    /// Returns the attempt number for a job that has not yet been retried.
+    /// Returns the index of a job's first attempt (zero), before any retry.
     pub const fn zero() -> Self {
         Self(0)
     }
 
-    /// Returns the raw attempt count.
+    /// Returns the raw zero-based attempt index.
     #[must_use]
     pub const fn value(self) -> u32 {
         self.0
