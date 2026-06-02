@@ -1,13 +1,24 @@
 use std::fmt;
 
+/// An error returned by a fallible domain operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DomainError {
+    /// A [`JobId`](crate::domain::JobId) was constructed from an empty string.
     EmptyJobId,
+    /// A [`TargetRef`](crate::domain::TargetRef) was constructed from an empty string.
     EmptyTargetRef,
+    /// Advancing a [`SchedulerTime`](crate::domain::SchedulerTime) overflowed
+    /// the representable range.
     TimeOverflow,
+    /// Incrementing an [`AttemptNumber`](crate::domain::AttemptNumber) overflowed
+    /// `u32::MAX`.
     AttemptOverflow,
+    /// A transition was attempted on a job already in a terminal status.
     JobTerminal,
+    /// A transition was attempted that is not legal from the job's current
+    /// non-terminal status.
     IllegalTransition,
+    /// The ready queue could not accept another job because it is at capacity.
     QueueFull,
 }
 

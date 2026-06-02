@@ -1,9 +1,27 @@
 use crate::domain::{Deadline, DomainError, Priority, ReadyAt};
 
+/// A non-empty identifier that uniquely names a job.
+///
+/// Identifiers order lexicographically by their string value.
+///
+/// # Examples
+///
+/// ```
+/// use invariant_scheduler::domain::JobId;
+///
+/// let id = JobId::new("job-1")?;
+/// assert_eq!(id.as_str(), "job-1");
+/// # Ok::<(), invariant_scheduler::domain::DomainError>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JobId(String);
 
 impl JobId {
+    /// Creates a job identifier from any string-like value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::EmptyJobId`] if `id` is empty.
     pub fn new(id: impl Into<String>) -> Result<Self, DomainError> {
         let value = id.into();
         if value.is_empty() {
@@ -12,16 +30,23 @@ impl JobId {
         Ok(Self(value))
     }
 
+    /// Returns the identifier as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
+/// A non-empty reference to the target a job executes against.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TargetRef(String);
 
 impl TargetRef {
+    /// Creates a target reference from any string-like value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::EmptyTargetRef`] if `target` is empty.
     pub fn new(target: impl Into<String>) -> Result<Self, DomainError> {
         let value = target.into();
         if value.is_empty() {
@@ -30,26 +55,35 @@ impl TargetRef {
         Ok(Self(value))
     }
 
+    /// Returns the target reference as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
+/// The zero-based count of how many times a job has been attempted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttemptNumber(u32);
 
 impl AttemptNumber {
+    /// Returns the attempt number for a job that has not yet been retried.
     pub const fn zero() -> Self {
         Self(0)
     }
 
+    /// Returns the raw attempt count.
     #[must_use]
     pub const fn value(self) -> u32 {
         self.0
     }
 
-    /// Returns the next attempt number, or `AttemptOverflow` at `u32::MAX`.
+    /// Returns the next attempt number.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::AttemptOverflow`] if the current value is
+    /// `u32::MAX`.
     pub fn checked_next(self) -> Result<Self, DomainError> {
         self.0
             .checked_add(1)
@@ -58,17 +92,32 @@ impl AttemptNumber {
     }
 }
 
+/// The lifecycle status of a [`Job`].
+///
+/// The live (non-terminal) states are [`Queued`](Self::Queued),
+/// [`Running`](Self::Running), and [`Failed`](Self::Failed). The terminal
+/// states, from which no transition is legal, are [`Completed`](Self::Completed),
+/// [`Cancelled`](Self::Cancelled), and [`Exhausted`](Self::Exhausted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
+    /// Waiting to start. A newly created job begins here.
     Queued,
+    /// Currently executing.
     Running,
+    /// A run failed; the job may be retried, exhausted, or cancelled.
     Failed,
+    /// Finished successfully. Terminal.
     Completed,
+    /// Abandoned before completion. Terminal.
     Cancelled,
+    /// Out of retry attempts after failing. Terminal.
     Exhausted,
 }
 
 impl JobStatus {
+    /// Returns `true` if this is a terminal status, namely
+    /// [`Completed`](Self::Completed), [`Cancelled`](Self::Cancelled), or
+    /// [`Exhausted`](Self::Exhausted).
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(
@@ -78,6 +127,32 @@ impl JobStatus {
     }
 }
 
+/// A unit of schedulable work and its lifecycle state.
+///
+/// A job is created in [`JobStatus::Queued`] with attempt number zero and moves
+/// through its [`JobStatus`] state machine via the transition methods
+/// ([`start`](Self::start), [`complete`](Self::complete), [`fail`](Self::fail),
+/// [`cancel`](Self::cancel), [`exhaust`](Self::exhaust), [`retry`](Self::retry)).
+///
+/// # Examples
+///
+/// ```
+/// use invariant_scheduler::domain::{Job, JobId, JobStatus, Priority, TargetRef};
+///
+/// let mut job = Job::new(
+///     JobId::new("job-1")?,
+///     TargetRef::new("component:greet")?,
+///     Priority::DEFAULT,
+///     None,
+///     None,
+/// );
+/// assert_eq!(job.status(), JobStatus::Queued);
+///
+/// job.start()?;
+/// job.complete()?;
+/// assert_eq!(job.status(), JobStatus::Completed);
+/// # Ok::<(), invariant_scheduler::domain::DomainError>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Job {
     id: JobId,
@@ -90,6 +165,10 @@ pub struct Job {
 }
 
 impl Job {
+    /// Creates a job in [`JobStatus::Queued`] with attempt number zero.
+    ///
+    /// `deadline` and `ready_at` are optional scheduling hints; pass `None` when
+    /// the job has no completion target or readiness gate.
     pub fn new(
         id: JobId,
         target: TargetRef,
@@ -108,36 +187,43 @@ impl Job {
         }
     }
 
+    /// Returns the job's identifier.
     #[must_use]
     pub fn id(&self) -> &JobId {
         &self.id
     }
 
+    /// Returns the reference to the target this job executes against.
     #[must_use]
     pub fn target(&self) -> &TargetRef {
         &self.target
     }
 
+    /// Returns the job's scheduling priority.
     #[must_use]
     pub fn priority(&self) -> Priority {
         self.priority
     }
 
+    /// Returns the job's deadline, if one was set.
     #[must_use]
     pub fn deadline(&self) -> Option<Deadline> {
         self.deadline
     }
 
+    /// Returns the job's readiness gate, if one was set.
     #[must_use]
     pub fn ready_at(&self) -> Option<ReadyAt> {
         self.ready_at
     }
 
+    /// Returns the job's current lifecycle status.
     #[must_use]
     pub fn status(&self) -> JobStatus {
         self.status
     }
 
+    /// Returns how many times the job has been attempted.
     #[must_use]
     pub fn attempt(&self) -> AttemptNumber {
         self.attempt
@@ -152,6 +238,14 @@ impl Job {
         }
     }
 
+    /// Transitions the job from [`Queued`](JobStatus::Queued) to
+    /// [`Running`](JobStatus::Running).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::IllegalTransition`] if the job is in any other
+    /// live status, or [`DomainError::JobTerminal`] if it is terminal. The
+    /// status is left unchanged on error.
     pub fn start(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Queued => {
@@ -162,6 +256,14 @@ impl Job {
         }
     }
 
+    /// Transitions the job from [`Running`](JobStatus::Running) to the terminal
+    /// [`Completed`](JobStatus::Completed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::IllegalTransition`] if the job is in any other
+    /// live status, or [`DomainError::JobTerminal`] if it is terminal. The
+    /// status is left unchanged on error.
     pub fn complete(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Running => {
@@ -172,6 +274,15 @@ impl Job {
         }
     }
 
+    /// Transitions the job from [`Running`](JobStatus::Running) to
+    /// [`Failed`](JobStatus::Failed), from which it may be retried, exhausted,
+    /// or cancelled.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::IllegalTransition`] if the job is in any other
+    /// live status, or [`DomainError::JobTerminal`] if it is terminal. The
+    /// status is left unchanged on error.
     pub fn fail(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Running => {
@@ -182,6 +293,15 @@ impl Job {
         }
     }
 
+    /// Transitions the job from any live status
+    /// ([`Queued`](JobStatus::Queued), [`Running`](JobStatus::Running), or
+    /// [`Failed`](JobStatus::Failed)) to the terminal
+    /// [`Cancelled`](JobStatus::Cancelled).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::JobTerminal`] if the job is already terminal. The
+    /// status is left unchanged on error.
     pub fn cancel(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Queued | JobStatus::Running | JobStatus::Failed => {
@@ -192,6 +312,14 @@ impl Job {
         }
     }
 
+    /// Transitions the job from [`Failed`](JobStatus::Failed) to the terminal
+    /// [`Exhausted`](JobStatus::Exhausted), marking it as out of retries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::IllegalTransition`] if the job is in any other
+    /// live status, or [`DomainError::JobTerminal`] if it is terminal. The
+    /// status is left unchanged on error.
     pub fn exhaust(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Failed => {
@@ -202,6 +330,18 @@ impl Job {
         }
     }
 
+    /// Transitions the job from [`Failed`](JobStatus::Failed) back to
+    /// [`Queued`](JobStatus::Queued), incrementing its attempt number.
+    ///
+    /// The operation is atomic: if the attempt number cannot be incremented,
+    /// neither the attempt nor the status is changed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DomainError::AttemptOverflow`] if the attempt number is already
+    /// `u32::MAX`. Returns [`DomainError::IllegalTransition`] if the job is in
+    /// any other live status, or [`DomainError::JobTerminal`] if it is terminal.
+    /// The status is left unchanged on error.
     pub fn retry(&mut self) -> Result<(), DomainError> {
         match self.status {
             JobStatus::Failed => {
