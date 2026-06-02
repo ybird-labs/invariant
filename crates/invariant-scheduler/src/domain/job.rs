@@ -526,4 +526,28 @@ mod tests {
             }
         }
     }
+
+    #[cfg(kani)]
+    mod proofs {
+        use super::*;
+
+        #[kani::proof]
+        fn retry_is_atomic_for_all_attempts() {
+            let attempt: u32 = kani::any(); // symbolic: ALL 2^32 values at once
+            let mut job = job_in(JobStatus::Failed);
+            job.attempt = AttemptNumber(attempt);
+            let before = job.clone();
+
+            match job.retry() {
+                Ok(()) => {
+                    assert_eq!(job.attempt().value(), attempt + 1);
+                    assert_eq!(job.status(), JobStatus::Queued);
+                }
+                Err(e) => {
+                    assert_eq!(e, DomainError::AttemptOverflow);
+                    assert_eq!(job, before); // atomicity, proven for every value
+                }
+            }
+        }
+    }
 }

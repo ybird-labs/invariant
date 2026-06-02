@@ -3,6 +3,13 @@ name = "invariant-scheduler"
 version = "0.1.0"
 edition = "2024"
 
+# `kani` is an externally-set cfg (only active when `cargo kani` drives the
+# build). Register it so the `unexpected_cfgs` lint recognizes `#[cfg(kani)]`
+# on the proof harness instead of flagging it as a typo, while still checking
+# every other cfg name.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dev-dependencies]
 proptest = "1.11"
 
