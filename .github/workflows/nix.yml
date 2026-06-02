@@ -103,7 +103,7 @@ jobs:
     name: rust-quality (ubuntu)
     needs: changes
     if: needs.changes.outputs.rust-quality == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout
@@ -113,9 +113,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@90bb610b90bf290cad97484ba341453bd1cbefea
-
-      - name: Enable Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39
 
       - name: Run fmt, clippy, and tests
         run: nix develop --accept-flake-config -c just _rust-quality
