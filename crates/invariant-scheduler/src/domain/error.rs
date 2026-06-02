@@ -7,6 +7,7 @@ pub enum DomainError {
     TimeOverflow,
     AttemptOverflow,
     JobTerminal,
+    IllegalTransition,
     QueueFull,
 }
 
@@ -18,6 +19,7 @@ impl fmt::Display for DomainError {
             Self::TimeOverflow => "scheduler time overflow",
             Self::AttemptOverflow => "attempt number overflow",
             Self::JobTerminal => "job is terminal",
+            Self::IllegalTransition => "illegal job state transition",
             Self::QueueFull => "ready queue is full",
         };
         f.write_str(message)
@@ -38,6 +40,10 @@ mod tests {
             (DomainError::TimeOverflow, "scheduler time overflow"),
             (DomainError::AttemptOverflow, "attempt number overflow"),
             (DomainError::JobTerminal, "job is terminal"),
+            (
+                DomainError::IllegalTransition,
+                "illegal job state transition",
+            ),
             (DomainError::QueueFull, "ready queue is full"),
         ];
 
