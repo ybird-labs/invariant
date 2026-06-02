@@ -220,6 +220,20 @@ impl Job {
 mod tests {
     use super::*;
 
+    /// A fresh `Job` forced into `status`. Direct field access is legal
+    /// because this test module is a descendant of the `job` module.
+    fn job_in(status: JobStatus) -> Job {
+        let mut job = Job::new(
+            JobId::new("job-1").unwrap(),
+            TargetRef::new("component:greet").unwrap(),
+            Priority::DEFAULT,
+            None,
+            None,
+        );
+        job.status = status;
+        job
+    }
+
     mod job_id {
         use super::*;
 
@@ -337,20 +351,6 @@ mod tests {
             Event::Exhaust,
             Event::Retry,
         ];
-
-        /// A fresh `Job` forced into `status`. Direct field access is legal
-        /// because this test module is a descendant of the `job` module.
-        fn job_in(status: JobStatus) -> Job {
-            let mut job = Job::new(
-                JobId::new("job-1").unwrap(),
-                TargetRef::new("component:greet").unwrap(),
-                Priority::DEFAULT,
-                None,
-                None,
-            );
-            job.status = status;
-            job
-        }
 
         fn apply(job: &mut Job, event: Event) -> Result<(), DomainError> {
             match event {
@@ -471,6 +471,59 @@ mod tests {
             // Atomicity: the failed bump leaves both fields untouched.
             assert_eq!(job.status(), JobStatus::Failed);
             assert_eq!(job.attempt().value(), u32::MAX);
+        }
+    }
+
+    mod property_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn terminal_status() -> impl Strategy<Value = JobStatus> {
+            prop_oneof![
+                Just(JobStatus::Completed),
+                Just(JobStatus::Cancelled),
+                Just(JobStatus::Exhausted)
+            ]
+        }
+        type Transition = fn(&mut Job) -> Result<(), DomainError>;
+
+        const TRANSITIONS: [Transition; 6] = [
+            Job::start,
+            Job::complete,
+            Job::fail,
+            Job::cancel,
+            Job::exhaust,
+            Job::retry,
+        ];
+
+        proptest! {
+            #[test]
+            fn terminal_states_are_sinks(status in terminal_status()) {
+                    for transition in TRANSITIONS {
+                    let mut job = job_in(status);
+                    prop_assert_eq!(transition(&mut job), Err(DomainError::JobTerminal));
+                    prop_assert_eq!(job.status(), status);
+                    }
+            }
+
+            #[test]
+            fn retry_increments_or_leaves_untouched(attempt in any::<u32>()) {
+                let mut job = job_in(JobStatus::Failed);
+                job.attempt = AttemptNumber(attempt);
+                let pre = job.clone();
+
+                match job.retry() {
+                    Ok(()) => {
+                        prop_assert_eq!(job.attempt().value(), attempt + 1);
+                        prop_assert_eq!(job.status(), JobStatus::Queued);
+                    }
+                    Err(err) => {
+                        prop_assert_eq!(err, DomainError::AttemptOverflow);
+                        // Atomicity: a failed bump leaves the whole job untouched.
+                        prop_assert_eq!(job, pre);
+                    }
+                }
+            }
         }
     }
 }
