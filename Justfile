@@ -87,7 +87,7 @@ _verify:
 verify:
     nix develop --accept-flake-config -c just _verify
 
-# One-time Kani toolchain setup (downloads the Kani bundle into ~/.kani).
+# One-time Kani setup. A no-op inside the Nix dev shell (KANI_HOME is pre-staged); only needed when running cargo kani outside Nix.
 _kani-setup:
     cargo kani setup
 

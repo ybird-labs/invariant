@@ -143,7 +143,7 @@
         }.${system};
         kaniBundleHash = {
           aarch64-darwin = "sha256-f9C3ETCqN70eNG66Z1qtCem2bks4P3B/xlczDOsp7uw=";
-          x86_64-darwin = null; # not separately prefetched; add hash if needed
+          x86_64-darwin = throw "kani bundle hash not yet pinned for x86_64-darwin; prefetch the release tarball and add its sha256";
           x86_64-linux = "sha256-O196/TtRYD7nINt7wbxP5GtaT1022q2ZOcS0xli1GsA=";
           aarch64-linux = "sha256-l0Eo9E3UNhigbSHl/m2f9nGI3lmG/gvFe1NLDkY577k=";
         }.${system};
