@@ -44,6 +44,7 @@ jobs:
               - 'justfile'
               - 'flake.nix'
               - 'flake.lock'
+              - '.github/workflows/nix.yml'
               - 'crates/**'
             rust-quality:
               - 'Cargo.toml'
@@ -52,6 +53,7 @@ jobs:
               - 'justfile'
               - 'flake.nix'
               - 'flake.lock'
+              - '.github/workflows/nix.yml'
               - 'rust-toolchain.toml'
               - '.cargo/**'
               - '.config/**'
@@ -69,6 +71,7 @@ jobs:
               - 'justfile'
               - 'flake.nix'
               - 'flake.lock'
+              - '.github/workflows/nix.yml'
               - '.cargo/**'
               - 'scripts/ci/**'
               - 'crates/**'
