@@ -8,10 +8,12 @@
 
 pub mod error;
 mod job;
+mod job_order;
 mod priority;
 mod time;
 
 pub use error::DomainError;
 pub use job::{AttemptNumber, Job, JobId, JobStatus, TargetRef};
+pub use job_order::{ByPriority, Fifo, JobOrder};
 pub use priority::{Deadline, Priority, ReadyAt};
 pub use time::SchedulerTime;
