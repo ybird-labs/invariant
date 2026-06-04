@@ -25,8 +25,11 @@ pub trait JobOrder: Send + Sync {
 
 /// First-in, first-out order.
 ///
-/// Every job maps to the same key, so the queue's enqueue sequence alone decides
-/// dispatch order.
+/// [`Fifo`] maps every job to the same [`Key`](JobOrder::Key) (`()`), so on its
+/// own it imposes no order at all. A `BinaryHeap` is not stable, so equal keys do
+/// not pop in insertion order: true FIFO requires the queue to break ties with an
+/// enqueue sequence number (or insertion timestamp). Use this ordering only with
+/// a queue that supplies such a tiebreaker.
 pub struct Fifo;
 
 impl JobOrder for Fifo {
