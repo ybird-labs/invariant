@@ -3,4 +3,5 @@
 
 mod admissions;
 mod job_runner;
+mod scheduler_core;
 mod slot_supplier;
