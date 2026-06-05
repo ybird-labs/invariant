@@ -3,8 +3,7 @@
 //! A [`JobOrder`] maps a [`Job`] to an immutable comparator
 //! [`Key`](JobOrder::Key) computed once at enqueue time. The ready queue stores
 //! that key and orders by it, so dispatch order never depends on `Job`
-//! implementing `Ord` (it deliberately does not). [`Fifo`] and [`ByPriority`]
-//! are the built-in policies.
+//! implementing `Ord`. [`Fifo`] and [`ByPriority`] are the built-in policies.
 
 use std::cmp::Reverse;
 
