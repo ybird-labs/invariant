@@ -22,9 +22,8 @@ use crate::domain::{Job, JobOrder};
 ///
 /// The `enqueue_seq` is a per-queue, runtime-assigned ordinal used to break
 /// ties between jobs with equal comparator keys, so that the job enqueued
-/// earlier dispatches first. [`QueuedJob`] deliberately does not implement
-/// [`Ord`]: ordering lives only on the queue's frozen key, never on the job's
-/// mutable state.
+/// earlier dispatches first. Ordering lives only on the queue's frozen key,
+/// never on a [`QueuedJob`]'s mutable state.
 #[derive(Debug, Clone)]
 pub struct QueuedJob {
     job: Job,
@@ -129,7 +128,7 @@ impl<O: JobOrder> ReadyQueue<O> {
     /// smaller `enqueue_seq` (the job enqueued earlier). Draining a queue fully
     /// yields a strict total order that does not depend on push order.
     pub fn pop(&mut self) -> Option<QueuedJob> {
-        self.heap.pop().map(|entry| entry.queued) // unwrap the Entry
+        self.heap.pop().map(|entry| entry.queued)
     }
 
     /// Returns an iterator over the queued jobs in an unspecified order.

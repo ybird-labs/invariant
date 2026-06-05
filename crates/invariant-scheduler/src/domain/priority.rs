@@ -25,8 +25,7 @@ impl Priority {
     pub const MIN: Self = Self(u8::MIN);
     /// Most urgent priority.
     pub const MAX: Self = Self(u8::MAX);
-    /// Neutral baseline at the middle of the range, leaving headroom in both
-    /// directions.
+    /// Neutral baseline at the middle of the range.
     pub const DEFAULT: Self = Self(128);
 
     /// Creates a priority from a raw level, where higher is more urgent.
