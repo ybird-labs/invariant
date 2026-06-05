@@ -2,4 +2,5 @@
 //! where scheduling decisions are carried out.
 
 mod admissions;
+mod job_runner;
 mod slot_supplier;
