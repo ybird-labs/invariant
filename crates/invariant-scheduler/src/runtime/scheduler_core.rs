@@ -113,6 +113,7 @@ impl<O: JobOrder> SchedulerCore<O> {
     /// Panics if the enqueue sequence would overflow on admission, the guard
     /// against aliasing a live sequence. Practically unreachable: reaching it
     /// would take `u128::MAX` admissions.
+    #[must_use = "dropping the actions leaks reserved slots"]
     pub(crate) fn on_command(&mut self, command: Command) -> Vec<Action> {
         match command {
             Command::Submit(job) => match self.capacity.admit(self.queue.len()) {
@@ -142,11 +143,11 @@ impl<O: JobOrder> SchedulerCore<O> {
         }
         // Safety: never dispatch beyond the slot bound. The loop condition
         // guarantees it; this guards against a future edit breaking it.
-        debug_assert!(self.running_count <= self.slots.get());
+        assert!(self.running_count <= self.slots.get());
         // Work-conserving: never leave a slot idle while a job waits. The loop
         // exits only on a full slot count or a drained queue, so one disjunct
         // always holds.
-        debug_assert!(self.running_count == self.slots.get() || self.queue.is_empty());
+        assert!(self.running_count == self.slots.get() || self.queue.is_empty());
         actions
     }
 
@@ -169,6 +170,7 @@ impl<O: JobOrder> SchedulerCore<O> {
     /// Panics if no job is running. A completion with `running_count == 0` is a
     /// structural double-free of a slot, not a runtime condition: it can only
     /// mean the caller violated the one-completion-per-spawn contract above.
+    #[must_use = "dropping the actions leaks reserved slots"]
     pub(crate) fn on_completion(&mut self) -> Vec<Action> {
         assert!(self.running_count > 0);
         self.running_count -= 1;
@@ -269,8 +271,8 @@ mod tests {
     #[test]
     fn rejected_submit_carries_the_bare_job() {
         let mut core = core(1, 1);
-        core.on_command(Command::Submit(job("job-1")));
-        core.on_command(Command::Submit(job("job-2")));
+        let _ = core.on_command(Command::Submit(job("job-1")));
+        let _ = core.on_command(Command::Submit(job("job-2")));
 
         let rejected = core.on_command(Command::Submit(job("job-3")));
 
@@ -283,11 +285,11 @@ mod tests {
     #[test]
     fn seq_only_advances_on_admission() {
         let mut core = core(1, 1);
-        core.on_command(Command::Submit(job("job-1"))); // admitted, spawned
-        core.on_command(Command::Submit(job("job-2"))); // admitted, queued
+        let _ = core.on_command(Command::Submit(job("job-1"))); // admitted, spawned
+        let _ = core.on_command(Command::Submit(job("job-2"))); // admitted, queued
         assert_eq!(core.next_seq(), 2);
 
-        core.on_command(Command::Submit(job("job-3"))); // rejected
+        let _ = core.on_command(Command::Submit(job("job-3"))); // rejected
 
         assert_eq!(core.next_seq(), 2);
     }
@@ -295,8 +297,8 @@ mod tests {
     #[test]
     fn completion_refills_the_next_queued_job() {
         let mut core = core(64, 1);
-        core.on_command(Command::Submit(job("running")));
-        core.on_command(Command::Submit(job("queued")));
+        let _ = core.on_command(Command::Submit(job("running")));
+        let _ = core.on_command(Command::Submit(job("queued")));
 
         let refilled = core.on_completion();
 
@@ -308,9 +310,9 @@ mod tests {
     #[test]
     fn completion_refills_the_highest_priority_waiter() {
         let mut core = core(64, 1);
-        core.on_command(Command::Submit(prioritized("running", 100)));
-        core.on_command(Command::Submit(prioritized("low", 10)));
-        core.on_command(Command::Submit(prioritized("high", 200)));
+        let _ = core.on_command(Command::Submit(prioritized("running", 100)));
+        let _ = core.on_command(Command::Submit(prioritized("low", 10)));
+        let _ = core.on_command(Command::Submit(prioritized("high", 200)));
 
         let refilled = core.on_completion();
         match refilled.as_slice() {
@@ -329,7 +331,7 @@ mod tests {
     fn completion_refills_exactly_one_waiter() {
         let mut core = core(64, 2);
         for i in 0..5 {
-            core.on_command(Command::Submit(job(&format!("job-{i}"))));
+            let _ = core.on_command(Command::Submit(job(&format!("job-{i}"))));
         }
         assert_eq!(core.running_count(), 2);
         assert_eq!(core.queue_len(), 3);
@@ -344,7 +346,7 @@ mod tests {
     #[test]
     fn completion_with_empty_queue_frees_the_slot() {
         let mut core = core(64, 2);
-        core.on_command(Command::Submit(job("solo")));
+        let _ = core.on_command(Command::Submit(job("solo")));
 
         let freed = core.on_completion();
 
@@ -378,7 +380,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "running_count > 0")]
     fn completion_without_running_jobs_panics() {
-        core(1, 1).on_completion();
+        let _ = core(1, 1).on_completion();
     }
 
     mod props {
@@ -392,32 +394,50 @@ mod tests {
             Complete,
         }
 
+        /// Draws the submit weight per case so some cases are submit-heavy
+        /// bursts: with a fixed 1:2 Submit:Complete mix, small capacities
+        /// almost never overflow and the reject path goes untested.
         fn ops() -> impl Strategy<Value = Vec<Op>> {
-            prop::collection::vec(
-                prop_oneof![1 => Just(Op::Submit), 2 => Just(Op::Complete)],
-                0..64,
-            )
+            (1u32..=8).prop_flat_map(|submit_weight| {
+                prop::collection::vec(
+                    prop_oneof![
+                        submit_weight => Just(Op::Submit),
+                        2 => Just(Op::Complete),
+                    ],
+                    0..64,
+                )
+            })
         }
 
         proptest! {
             #[test]
             fn slot_accounting_holds_under_any_interleaving(
+                cap in 1usize..8,
                 slot in 1usize..4,
                 ops in ops(),
             ) {
-                let mut core = core(1024, slot);
+                let mut core = core(cap, slot);
                 // Pure INPUT counts: never derived from emitted actions.
                 let (mut submitted, mut completed) = (0usize, 0usize);
-                // Independent emission-balance oracle.
-                let mut spawned = 0usize;
+                // Independent emission-balance oracles.
+                let (mut spawned, mut rejected) = (0usize, 0usize);
 
                 for (i, op) in ops.iter().enumerate() {
                     match op {
                         Op::Submit => {
+                            let before = (core.running_count(), core.queue_len(), core.next_seq());
                             let actions = core.on_command(Command::Submit(job(&format!("job-{i}"))));
-                            prop_assert!(actions.iter().all(|a| matches!(a, Action::Spawn(_))));
-                            spawned += actions.len();
                             submitted += 1;
+                            if actions.iter().any(|a| matches!(a, Action::Reject(_))) {
+                                prop_assert!(matches!(actions.as_slice(), [Action::Reject(_)]));
+                                rejected += 1;
+                                // No-op guarantee: a rejection changes nothing.
+                                let after = (core.running_count(), core.queue_len(), core.next_seq());
+                                prop_assert_eq!(after, before);
+                            } else {
+                                prop_assert!(actions.iter().all(|a| matches!(a, Action::Spawn(_))));
+                                spawned += actions.len();
+                            }
                         }
                         // Gate on the system's own truth, not a derived shadow.
                         Op::Complete if core.running_count() > 0 => {
@@ -427,27 +447,49 @@ mod tests {
                         Op::Complete => {}
                     }
 
-                    let expected_running = (submitted - completed).min(slot);
+                    let admitted = submitted - rejected;
+                    let expected_running = (admitted - completed).min(slot);
                     prop_assert!(core.running_count() <= slot);
                     prop_assert_eq!(core.running_count(), expected_running);
                     prop_assert!(core.running_count() == slot || core.queue_len() == 0);
+                    prop_assert!(core.queue_len() <= cap);
                 }
 
                 while core.running_count() > 0 {
                     spawned += core.on_completion().len();
                     completed += 1;
 
-                    let expected_running = (submitted - completed).min(slot);
+                    let admitted = submitted - rejected;
+                    let expected_running = (admitted - completed).min(slot);
                     prop_assert!(core.running_count() <= slot);
                     prop_assert_eq!(core.running_count(), expected_running);
                     prop_assert!(core.running_count() == slot || core.queue_len() == 0);
+                    prop_assert!(core.queue_len() <= cap);
                 }
 
+                // Conservation at quiescence: every submit was either spawned
+                // (and completed) or rejected; nothing was lost or duplicated.
                 prop_assert_eq!(core.running_count(), 0);
                 prop_assert_eq!(core.queue_len(), 0);
-                prop_assert_eq!(spawned, submitted);
-                prop_assert_eq!(completed, submitted);
+                prop_assert_eq!(spawned + rejected, submitted);
+                prop_assert_eq!(completed, spawned);
             }
+        }
+
+        /// Coverage guard for the property above: drives the smallest core to a
+        /// guaranteed [`Action::Reject`], so the reject path cannot silently
+        /// become dead if the proptest op distribution shifts.
+        #[test]
+        fn reject_path_is_reachable_at_minimum_capacity() {
+            let mut core = core(1, 1);
+            let running = core.on_command(Command::Submit(job("running")));
+            let waiting = core.on_command(Command::Submit(job("waiting")));
+            assert!(matches!(running.as_slice(), [Action::Spawn(_)]));
+            assert!(waiting.is_empty());
+
+            let overflow = core.on_command(Command::Submit(job("overflow")));
+
+            assert!(matches!(overflow.as_slice(), [Action::Reject(_)]));
         }
     }
 }
