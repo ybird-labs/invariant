@@ -235,7 +235,7 @@ mod tests {
 
         use super::*; // brings ReadyQueue, QueuedJob, Entry, and the parent's job_named
         use crate::domain::{
-            ByPriority, Deadline, JobId, JobOrder, Priority, SchedulerTime, TargetRef,
+            ByPriority, Deadline, Fifo, JobId, JobOrder, Priority, SchedulerTime, TargetRef,
         };
 
         /// One generated batch: `(enqueue_seq, priority, deadline_ms)` rows.
@@ -264,12 +264,15 @@ mod tests {
             )
         }
 
-        /// Builds a queue by pushing `order` front-to-back, then drains it fully
-        /// via `pop`, returning the popped `enqueue_seq`s in pop order. This is
-        /// the system under test for the ordering properties.
-        fn drain_in_push_order(order: &[(u128, u8, Option<u64>)]) -> Vec<u128> {
-            let mut queue = ReadyQueue::new(ByPriority);
-            for (seq, priority, deadline) in order {
+        /// Builds a queue ordered by `order`, pushes `batch` front-to-back, then
+        /// drains it fully via `pop`, returning the popped `enqueue_seq`s in pop
+        /// order. This is the system under test for the ordering properties.
+        fn drain_in_push_order<O: JobOrder>(
+            order: O,
+            batch: &[(u128, u8, Option<u64>)],
+        ) -> Vec<u128> {
+            let mut queue = ReadyQueue::new(order);
+            for (seq, priority, deadline) in batch {
                 let job = make_job(&format!("job-{seq}"), *priority, *deadline);
                 queue.push(QueuedJob::new(job, *seq));
             }
@@ -299,7 +302,7 @@ mod tests {
         proptest! {
             #[test]
             fn pop_order_matches_sorted_oracle(batch in items()) {
-                let popped = drain_in_push_order(&batch);
+                let popped = drain_in_push_order(ByPriority, &batch);
 
                 // Oracle: compute each frozen key ONCE via the (trusted) comparator,
                 // then sort by key DESC, seq ASC. Never touches a second heap, so
@@ -321,7 +324,10 @@ mod tests {
                 // Deterministic replay: the same set pushed in any order drains
                 // identically. Oracle-free — relies on no comparator assumption,
                 // so it can't inherit a bug from the key.
-                prop_assert_eq!(drain_in_push_order(&original), drain_in_push_order(&shuffled));
+                prop_assert_eq!(
+                    drain_in_push_order(ByPriority, &original),
+                    drain_in_push_order(ByPriority, &shuffled)
+                );
             }
 
             #[test]
@@ -352,8 +358,17 @@ mod tests {
                 let pushed: std::collections::BTreeSet<u128> =
                     batch.iter().map(|(seq, _, _)| *seq).collect();
                 let popped: std::collections::BTreeSet<u128> =
-                    drain_in_push_order(&batch).into_iter().collect();
+                    drain_in_push_order(ByPriority, &batch).into_iter().collect();
                 prop_assert_eq!(pushed, popped);
+            }
+
+            #[test]
+            fn fifo_pops_in_strict_insertion_order(batch in items()) {
+                // `Fifo`'s key is `()`, so every entry ties and the `enqueue_seq`
+                // tiebreak alone decides: drain order is exactly insertion order,
+                // whatever priorities or deadlines the jobs carry.
+                let expected: Vec<u128> = batch.iter().map(|(seq, _, _)| *seq).collect();
+                prop_assert_eq!(drain_in_push_order(Fifo, &batch), expected);
             }
         }
     }
